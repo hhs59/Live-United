@@ -1,0 +1,102 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover">
+  <title>Uni — Live United Voice Assistant</title>
+  <meta name="description" content="Talk with Uni, the Live United voice assistant.">
+  <meta name="theme-color" content="#F4F3EF">
+  <meta name="apple-mobile-web-app-capable" content="yes">
+  <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+
+  <!-- Favicon -->
+  <link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'><rect width='100' height='100' rx='28' fill='%231B5FAA'/><circle cx='50' cy='50' r='28' fill='%23F5881F'/><circle cx='42' cy='45' r='4' fill='white'/><circle cx='58' cy='45' r='4' fill='white'/><path d='M39 59c7 7 15 7 22 0' fill='none' stroke='white' stroke-width='4' stroke-linecap='round'/></svg>">
+
+  <!-- Stylesheet -->
+  <link rel="stylesheet" href="style.css">
+</head>
+<body>
+
+  <!-- Browser Unsupported Banner -->
+  <div id="unsupported-banner">
+    ⚠️ Real-time audio is not supported in this browser. Use the latest <strong>Chrome</strong> or <strong>Edge</strong>.
+  </div>
+
+  <!-- Main App -->
+  <div id="app">
+
+    <!-- Header -->
+    <header id="header">
+      <div class="header-center">
+        <a class="brand" href="/" aria-label="Uni voice companion">
+          <span class="brand-mark" aria-hidden="true">U</span>
+          <span class="brand-copy">
+            <span class="brand-name">Uni</span>
+            <span class="brand-caption">Live United</span>
+          </span>
+        </a>
+        <div id="voice-badge" class="connection-pill" title="Powered by Gemini Live API">
+          <span class="connection-dot" aria-hidden="true"></span>
+          <span>Voice · Vietnamese</span>
+        </div>
+      </div>
+    </header>
+
+    <main class="voice-main">
+      <!-- Avatar Section -->
+      <section id="avatar-section" aria-label="Uni voice assistant">
+        <div class="scene-label">
+          <span class="scene-label-line" aria-hidden="true"></span>
+          <span>UNI VOICE COMPANION</span>
+          <span class="scene-label-line" aria-hidden="true"></span>
+        </div>
+
+        <div id="avatar-container">
+          <div id="avatar-glow"></div>
+          <img id="avatar-img" src="assets/uni-idle.jpg" alt="Uni mascot - idle" />
+        </div>
+
+        <!-- Sound Wave Indicator (shown while listening) -->
+        <div id="sound-wave">
+          <div class="wave-bar"></div>
+          <div class="wave-bar"></div>
+          <div class="wave-bar"></div>
+          <div class="wave-bar"></div>
+          <div class="wave-bar"></div>
+        </div>
+
+        <div class="status-wrap">
+          <p class="status-overline"><span class="status-led" aria-hidden="true"></span> <span id="state-label">READY</span></p>
+          <p id="status-text"></p>
+        </div>
+
+        <!-- Controls -->
+        <footer id="controls">
+          <div class="control-actions">
+            <button id="start-btn" class="mic-button" type="button" title="Start a voice session with Uni" aria-label="Start a voice session with Uni">
+              <span class="mic-icon-wrap" aria-hidden="true">
+                <svg viewBox="0 0 24 24" xmlns="http://www.w3.org/2000/svg">
+                  <path d="M12 1a4 4 0 0 0-4 4v7a4 4 0 0 0 8 0V5a4 4 0 0 0-4-4z"/>
+                  <path d="M19 10v2a7 7 0 0 1-14 0v-2" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"/>
+                  <line x1="12" y1="19" x2="12" y2="23" stroke="currentColor" stroke-width="2" stroke-linecap="round"/>
+                  <line x1="8" y1="23" x2="16" y2="23" stroke="currentColor" stroke-width="2" stroke-linecap="round"/>
+                </svg>
+              </span>
+              <span class="mic-button-label">Start speaking</span>
+            </button>
+            <button id="stop-btn" class="stop-button" type="button" title="Stop the voice session" aria-label="Stop the voice session" hidden>
+              <span class="stop-icon" aria-hidden="true"></span>
+              <span>Stop</span>
+            </button>
+          </div>
+        </footer>
+      </section>
+    </main>
+
+  </div>
+
+  <!-- Main application entry point -->
+  <script type="module" src="app.js"></script>
+
+</body>
+</html>
