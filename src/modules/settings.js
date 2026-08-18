@@ -226,28 +226,6 @@ export function saveSettings(settings) {
 }
 
 /**
- * Remove persisted settings and return fresh defaults.
- *
- * A storage removal failure does not make the application unusable; the
- * returned defaults can still be used for the current page session.
- *
- * @returns {{voiceId: string, prompt: string}}
- */
-export function resetSettings() {
-  const storage = getStorage();
-
-  if (storage) {
-    try {
-      storage.removeItem(STORAGE_KEY);
-    } catch (_) {
-      console.warn('Unable to clear saved Uni settings.');
-    }
-  }
-
-  return createDefaultSettings();
-}
-
-/**
  * Find a voice by ID without exposing the frozen internal record.
  *
  * @param {unknown} voiceId

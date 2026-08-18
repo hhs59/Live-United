@@ -14,13 +14,6 @@ const OUTPUT_SAMPLE_RATE = 24000;
 const DEFAULT_VOICE = DEFAULT_SETTINGS.voiceId;
 const ALLOWED_VOICE_IDS = new Set(VOICES.map((voice) => voice.id));
 const AUDIO_WORKLET_NAME = 'uni-pcm-capture';
-const FALLBACK_SYSTEM_PROMPT = [
-  'Bạn là Uni, linh vật Live United.',
-  'Luôn trả lời bằng tiếng Việt, trừ khi người dùng yêu cầu ngôn ngữ khác.',
-  'Nói tự nhiên, thân thiện, tích cực và ngắn gọn, tối đa 1-2 câu.',
-  'Không dùng Markdown, gạch đầu dòng, emoji hoặc câu trả lời chung chung.',
-  'Luôn trả lời đúng vào điều người dùng vừa nói.',
-].join(' ');
 
 // The browser microphone context is commonly 44.1kHz or 48kHz. This worklet resamples it to the 16kHz, signed 16-bit PCM required by Live API.
 const WORKLET_SOURCE = [
@@ -123,6 +116,20 @@ function getServerError(response) {
   return 'The Gemini Live API closed the connection.';
 }
 
+function getBackendUrl(path) {
+  const configuredOrigin = typeof window !== 'undefined'
+    ? window.UNI_BACKEND_URL
+    : '';
+  const fallbackOrigin = typeof window !== 'undefined' && window.location.hostname
+    ? `${window.location.protocol}//${window.location.hostname}:3000`
+    : 'http://localhost:3000';
+  const origin = typeof configuredOrigin === 'string' && configuredOrigin.trim()
+    ? configuredOrigin.trim()
+    : fallbackOrigin;
+
+  return origin.replace(/\/$/, '') + path;
+}
+
 function normalizeSessionConfig(sessionConfig) {
   const source = sessionConfig && typeof sessionConfig === 'object'
     ? sessionConfig
@@ -146,10 +153,12 @@ function normalizeSessionConfig(sessionConfig) {
 }
 
 function composeSystemPrompt(basePrompt, customPrompt) {
-  const base = typeof basePrompt === 'string' && basePrompt.trim()
-    ? basePrompt.trim()
-    : FALLBACK_SYSTEM_PROMPT;
+  const base = typeof basePrompt === 'string' ? basePrompt.trim() : '';
   const custom = typeof customPrompt === 'string' ? customPrompt.trim() : '';
+
+  if (!base) {
+    throw new Error('The backend did not return the base system prompt.');
+  }
 
   if (!custom) return base;
 
@@ -346,7 +355,7 @@ export function createLiveSession(callbacks = {}) {
         },
         systemInstruction: {
           parts: [{
-            text: systemPrompt || FALLBACK_SYSTEM_PROMPT,
+            text: systemPrompt,
           }],
         },
         sessionResumption: {},
@@ -377,7 +386,7 @@ export function createLiveSession(callbacks = {}) {
     tokenRequestController = requestController;
 
     try {
-      const tokenResponse = await fetch('/api/live-token', {
+      const tokenResponse = await fetch(getBackendUrl('/api/live-token'), {
         method: 'POST',
         signal: requestController.signal,
       });
@@ -394,10 +403,16 @@ export function createLiveSession(callbacks = {}) {
 
       websocket.onopen = () => {
         callbacks.onConnecting?.();
-        const systemPrompt = composeSystemPrompt(
-          tokenData.system_prompt,
-          normalizedConfig.systemPrompt,
-        );
+        let systemPrompt;
+        try {
+          systemPrompt = composeSystemPrompt(
+            tokenData.system_prompt,
+            normalizedConfig.systemPrompt,
+          );
+        } catch (error) {
+          rejectConnect(error);
+          return;
+        }
 
         if (!sendSetup(
           tokenData.model || LIVE_MODEL,

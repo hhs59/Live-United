@@ -37,7 +37,6 @@ let liveSession = null;
 let isProcessing = false;
 let shuttingDown = false;
 let savedSettings = getSettings();
-let draftSettings = { ...savedSettings };
 let settingsCloseTimer = null;
 
 function setControls(mode) {
@@ -46,13 +45,6 @@ function setControls(mode) {
   startBtn.hidden = !isIdle;
   stopBtn.hidden = isIdle;
   if (!isIdle) stopBtn.disabled = false;
-}
-
-function cloneSettings(settings) {
-  return {
-    voiceId: settings.voiceId,
-    prompt: settings.prompt,
-  };
 }
 
 function updateVoiceBadge(settings) {
@@ -142,7 +134,6 @@ function populateSettingsForm(settings) {
 
   settingsPrompt.value = settings.prompt;
   settingsVoice.value = settings.voiceId;
-  draftSettings = cloneSettings(settings);
   updatePromptValidation();
 }
 
@@ -173,8 +164,6 @@ function closeSettings() {
     settingsCloseTimer = null;
   }
 
-  draftSettings = cloneSettings(savedSettings);
-
   if (!settingsDialog) return;
   if (typeof settingsDialog.close === 'function' && settingsDialog.open) {
     settingsDialog.close();
@@ -201,7 +190,6 @@ function saveDraftSettings() {
       voiceId: settingsVoice.value,
     });
     savedSettings = saveSettings(normalized);
-    draftSettings = cloneSettings(savedSettings);
     updateVoiceBadge(savedSettings);
 
     if (settingsNotice) {
@@ -250,12 +238,7 @@ settingsForm?.addEventListener('submit', (event) => {
 });
 
 settingsPrompt?.addEventListener('input', () => {
-  draftSettings.prompt = settingsPrompt.value;
   updatePromptValidation();
-});
-
-settingsVoice?.addEventListener('change', () => {
-  draftSettings.voiceId = settingsVoice.value;
 });
 
 settingsReset?.addEventListener('click', () => {
@@ -273,7 +256,6 @@ promptTemplates?.addEventListener('click', (event) => {
   if (!template || !settingsPrompt) return;
 
   settingsPrompt.value = template.prompt;
-  draftSettings.prompt = template.prompt;
   updatePromptValidation();
 });
 
