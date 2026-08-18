@@ -35,9 +35,22 @@
             <span class="brand-caption">Live United</span>
           </span>
         </a>
-        <div id="voice-badge" class="connection-pill" title="Powered by Gemini Live API">
-          <span class="connection-dot" aria-hidden="true"></span>
-          <span>Voice · Vietnamese</span>
+        <div class="header-actions">
+          <div id="voice-badge" class="connection-pill" title="Powered by Gemini Live API">
+            <span class="connection-dot" aria-hidden="true"></span>
+            <span id="voice-badge-label">Voice · Vietnamese</span>
+          </div>
+          <button
+            id="settings-btn"
+            class="settings-button"
+            type="button"
+            aria-haspopup="dialog"
+            aria-controls="settings-dialog"
+            title="Open settings"
+          >
+            <span class="settings-icon" aria-hidden="true">⚙</span>
+            <span>Settings</span>
+          </button>
         </div>
       </div>
     </header>
@@ -92,6 +105,60 @@
         </footer>
       </section>
     </main>
+
+    <!-- Settings dialog; behavior is connected by app.js in a later phase. -->
+    <dialog id="settings-dialog" aria-labelledby="settings-title">
+      <form id="settings-form" method="dialog">
+        <header class="settings-header">
+          <div>
+            <p class="settings-kicker">UNI CONFIGURATION</p>
+            <h2 id="settings-title">Voice settings</h2>
+          </div>
+          <button id="settings-close" type="button" aria-label="Close settings">×</button>
+        </header>
+
+        <div class="settings-body">
+          <section aria-labelledby="persona-title">
+            <h3 id="persona-title">Chatbot persona</h3>
+            <p id="prompt-help" class="settings-help">
+              Describe how Uni should behave in the next voice session.
+            </p>
+            <div id="prompt-templates" role="group" aria-label="Prompt templates"></div>
+            <label for="settings-prompt">Custom prompt</label>
+            <textarea
+              id="settings-prompt"
+              name="prompt"
+              maxlength="4000"
+              rows="8"
+              spellcheck="true"
+              aria-describedby="prompt-help prompt-error prompt-count"
+            ></textarea>
+            <div class="prompt-meta">
+              <p id="prompt-error" role="alert" aria-live="polite"></p>
+              <p><span id="prompt-count">0</span>/4000</p>
+            </div>
+          </section>
+
+          <section aria-labelledby="voice-title">
+            <h3 id="voice-title">Voice ID</h3>
+            <p id="voice-help" class="settings-help">
+              Choose the voice Uni will use in the next session.
+            </p>
+            <label for="settings-voice">Voice</label>
+            <select id="settings-voice" name="voiceId" aria-describedby="voice-help"></select>
+          </section>
+        </div>
+
+        <p id="settings-notice" role="status" aria-live="polite"></p>
+
+        <footer class="settings-actions">
+          <button id="settings-reset" type="button">Restore defaults</button>
+          <span class="settings-actions-spacer" aria-hidden="true"></span>
+          <button id="settings-cancel" type="button">Cancel</button>
+          <button id="settings-save" type="submit">Save settings</button>
+        </footer>
+      </form>
+    </dialog>
 
   </div>
 

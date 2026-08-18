@@ -172,6 +172,63 @@ button {
   backdrop-filter: blur(12px);
 }
 
+.header-actions {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 8px;
+  max-width: 100%;
+}
+
+.settings-button {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 7px;
+  min-height: 36px;
+  padding: 0 12px;
+  color: var(--blue-deep);
+  font-size: 0.68rem;
+  font-weight: 800;
+  letter-spacing: 0.02em;
+  white-space: nowrap;
+  cursor: pointer;
+  border: 1px solid rgba(24, 87, 149, 0.16);
+  border-radius: 999px;
+  background: rgba(255, 255, 255, 0.58);
+  box-shadow: 0 8px 20px rgba(23, 33, 48, 0.04);
+  transition: color 0.2s ease, background 0.2s ease, border-color 0.2s ease, transform 0.2s var(--ease), box-shadow 0.2s ease;
+}
+
+.settings-button:hover {
+  color: #fff;
+  border-color: var(--blue);
+  background: var(--blue);
+  box-shadow: 0 10px 24px rgba(24, 87, 149, 0.2);
+  transform: translateY(-1px);
+}
+
+.settings-button:active {
+  transform: translateY(1px);
+}
+
+.settings-button:focus-visible,
+#settings-dialog button:focus-visible,
+#settings-dialog textarea:focus-visible,
+#settings-dialog select:focus-visible {
+  outline: 3px solid rgba(237, 116, 21, 0.3);
+  outline-offset: 3px;
+}
+
+.settings-icon {
+  display: inline-grid;
+  width: 17px;
+  height: 17px;
+  place-items: center;
+  font-size: 0.96rem;
+  line-height: 1;
+}
+
 .connection-dot,
 .status-led {
   display: inline-block;
@@ -181,6 +238,332 @@ button {
   border-radius: 50%;
   background: var(--green);
   box-shadow: 0 0 0 4px rgba(78, 154, 115, 0.13);
+}
+
+/* Settings dialog */
+#settings-dialog {
+  position: fixed;
+  inset: 0;
+  width: min(calc(100vw - 40px), 680px);
+  max-width: 680px;
+  max-height: min(780px, calc(100dvh - 48px));
+  margin: auto;
+  padding: 0;
+  color: var(--ink);
+  border: 1px solid rgba(255, 255, 255, 0.9);
+  border-radius: 28px;
+  background: rgba(251, 250, 247, 0.97);
+  box-shadow: 0 30px 90px rgba(24, 45, 67, 0.24), 0 2px 0 rgba(255, 255, 255, 0.8) inset;
+  overflow: hidden;
+}
+
+#settings-dialog::backdrop {
+  background: rgba(16, 37, 59, 0.42);
+  backdrop-filter: blur(7px);
+}
+
+#settings-dialog form {
+  display: flex;
+  flex-direction: column;
+  width: 100%;
+  max-height: min(780px, calc(100dvh - 48px));
+}
+
+.settings-header {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 20px;
+  flex: 0 0 auto;
+  padding: 26px 28px 22px;
+  border-bottom: 1px solid var(--line);
+  background: linear-gradient(135deg, rgba(223, 234, 243, 0.6), rgba(255, 255, 255, 0.35));
+}
+
+.settings-kicker {
+  margin-bottom: 7px;
+  color: var(--orange);
+  font-size: 0.58rem;
+  font-weight: 800;
+  letter-spacing: 0.2em;
+  line-height: 1;
+}
+
+#settings-dialog h2,
+#settings-dialog h3 {
+  color: var(--ink);
+}
+
+#settings-dialog h2 {
+  font-size: clamp(1.22rem, 2.2vw, 1.55rem);
+  font-weight: 800;
+  letter-spacing: -0.04em;
+  line-height: 1.15;
+}
+
+#settings-dialog h3 {
+  margin-bottom: 7px;
+  font-size: 0.92rem;
+  font-weight: 800;
+  letter-spacing: -0.015em;
+}
+
+#settings-close {
+  display: grid;
+  width: 34px;
+  height: 34px;
+  flex: 0 0 auto;
+  place-items: center;
+  padding: 0;
+  color: var(--ink-soft);
+  font-size: 1.4rem;
+  font-weight: 400;
+  line-height: 1;
+  cursor: pointer;
+  border: 1px solid var(--line);
+  border-radius: 50%;
+  background: rgba(255, 255, 255, 0.72);
+  transition: color 0.2s ease, background 0.2s ease, transform 0.2s var(--ease);
+}
+
+#settings-close:hover {
+  color: var(--blue-deep);
+  background: #fff;
+  transform: rotate(5deg);
+}
+
+.settings-body {
+  min-height: 0;
+  padding: 24px 28px 8px;
+  overflow-y: auto;
+  overscroll-behavior: contain;
+}
+
+.settings-body section {
+  min-width: 0;
+}
+
+.settings-body section + section {
+  margin-top: 24px;
+  padding-top: 24px;
+  border-top: 1px solid var(--line);
+}
+
+.settings-help {
+  margin-bottom: 14px;
+  color: var(--ink-soft);
+  font-size: 0.75rem;
+  line-height: 1.55;
+}
+
+#settings-dialog label {
+  display: block;
+  margin: 16px 0 7px;
+  color: var(--ink-soft);
+  font-size: 0.7rem;
+  font-weight: 800;
+  letter-spacing: 0.04em;
+}
+
+#prompt-templates {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 8px;
+}
+
+#prompt-templates button {
+  min-width: 0;
+  padding: 11px 12px;
+  color: var(--blue-deep);
+  font-size: 0.68rem;
+  font-weight: 800;
+  line-height: 1.3;
+  text-align: left;
+  cursor: pointer;
+  border: 1px solid rgba(24, 87, 149, 0.14);
+  border-radius: 13px;
+  background: rgba(255, 255, 255, 0.7);
+  transition: color 0.2s ease, background 0.2s ease, border-color 0.2s ease, box-shadow 0.2s ease, transform 0.2s var(--ease);
+}
+
+#prompt-templates button:hover,
+#prompt-templates button:focus-visible {
+  border-color: rgba(24, 87, 149, 0.38);
+  background: var(--blue-soft);
+  box-shadow: 0 7px 18px rgba(24, 87, 149, 0.1);
+  transform: translateY(-1px);
+}
+
+#prompt-templates button[aria-pressed='true'],
+#prompt-templates button.selected,
+#prompt-templates button.active {
+  color: #fff;
+  border-color: var(--blue);
+  background: var(--blue);
+  box-shadow: 0 8px 20px rgba(24, 87, 149, 0.2);
+}
+
+#settings-dialog textarea,
+#settings-dialog select {
+  display: block;
+  width: 100%;
+  color: var(--ink);
+  font: inherit;
+  font-size: 0.82rem;
+  line-height: 1.55;
+  border: 1px solid var(--line-strong);
+  border-radius: 14px;
+  background: rgba(255, 255, 255, 0.82);
+  box-shadow: inset 0 1px 2px rgba(23, 33, 48, 0.03);
+  transition: border-color 0.2s ease, box-shadow 0.2s ease, background 0.2s ease;
+}
+
+#settings-dialog textarea {
+  min-height: 154px;
+  padding: 13px 14px;
+  resize: vertical;
+}
+
+#settings-dialog select {
+  min-height: 48px;
+  padding: 0 40px 0 14px;
+  cursor: pointer;
+}
+
+#settings-dialog textarea:hover,
+#settings-dialog select:hover {
+  border-color: rgba(24, 87, 149, 0.34);
+}
+
+#settings-dialog textarea:focus,
+#settings-dialog select:focus {
+  border-color: var(--blue);
+  outline: 0;
+  background: #fff;
+  box-shadow: 0 0 0 4px rgba(24, 87, 149, 0.1);
+}
+
+#settings-dialog textarea[aria-invalid='true'] {
+  border-color: var(--red);
+  box-shadow: 0 0 0 4px rgba(189, 90, 83, 0.1);
+}
+
+.prompt-meta {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 12px;
+  min-height: 24px;
+  padding-top: 7px;
+}
+
+.prompt-meta p,
+#settings-notice {
+  font-size: 0.68rem;
+  line-height: 1.4;
+}
+
+#prompt-error {
+  min-width: 0;
+  color: var(--red);
+  font-weight: 700;
+}
+
+#prompt-error:empty {
+  visibility: hidden;
+}
+
+.prompt-meta > p:last-child {
+  flex: 0 0 auto;
+  color: var(--ink-faint);
+  font-variant-numeric: tabular-nums;
+  white-space: nowrap;
+}
+
+#settings-notice {
+  margin: 0 28px;
+  padding: 9px 11px;
+  color: var(--blue-deep);
+  font-weight: 700;
+  border: 1px solid rgba(24, 87, 149, 0.16);
+  border-radius: 10px;
+  background: var(--blue-soft);
+}
+
+#settings-notice:empty {
+  display: none;
+}
+
+.settings-actions {
+  display: flex;
+  align-items: center;
+  gap: 9px;
+  flex: 0 0 auto;
+  padding: 18px 28px calc(20px + env(safe-area-inset-bottom));
+  border-top: 1px solid var(--line);
+  background: rgba(251, 250, 247, 0.96);
+}
+
+.settings-actions-spacer {
+  flex: 1;
+}
+
+.settings-actions button {
+  min-height: 42px;
+  padding: 0 14px;
+  color: var(--ink-soft);
+  font-size: 0.7rem;
+  font-weight: 800;
+  cursor: pointer;
+  border: 1px solid var(--line-strong);
+  border-radius: 12px;
+  background: rgba(255, 255, 255, 0.7);
+  transition: color 0.2s ease, background 0.2s ease, border-color 0.2s ease, box-shadow 0.2s ease, transform 0.2s var(--ease);
+}
+
+.settings-actions button:hover {
+  color: var(--blue-deep);
+  border-color: rgba(24, 87, 149, 0.3);
+  background: #fff;
+  box-shadow: 0 6px 16px rgba(23, 33, 48, 0.08);
+  transform: translateY(-1px);
+}
+
+.settings-actions button:active {
+  transform: translateY(1px);
+}
+
+#settings-reset {
+  color: var(--ink-faint);
+  border-color: transparent;
+  background: transparent;
+}
+
+#settings-reset:hover {
+  color: var(--blue-deep);
+  border-color: var(--line);
+  background: rgba(255, 255, 255, 0.58);
+}
+
+#settings-save {
+  color: #fff;
+  border-color: var(--orange);
+  background: linear-gradient(135deg, var(--orange), #f59229);
+  box-shadow: 0 8px 18px rgba(237, 116, 21, 0.22);
+}
+
+#settings-save:hover {
+  color: #fff;
+  border-color: var(--orange);
+  background: linear-gradient(135deg, #d8650c, var(--orange));
+  box-shadow: 0 11px 24px rgba(237, 116, 21, 0.3);
+}
+
+#settings-save:disabled {
+  cursor: not-allowed;
+  opacity: 0.48;
+  box-shadow: none;
+  transform: none;
 }
 
 /* Main experience */
@@ -201,6 +584,7 @@ button {
   justify-content: center;
   width: 100%;
   min-height: 0;
+  overflow-x: clip;
   padding: clamp(24px, 4vw, 38px) 24px 30px;
   text-align: center;
   border: 1px solid rgba(255, 255, 255, 0.76);
@@ -641,6 +1025,15 @@ button {
     width: calc(100% - 32px);
   }
 
+  .header-actions {
+    gap: 6px;
+  }
+
+  .settings-button {
+    min-height: 34px;
+    padding: 0 10px;
+  }
+
   .connection-pill {
     padding: 8px 10px;
     font-size: 0.6rem;
@@ -682,11 +1075,77 @@ button {
   .stop-button {
     padding: 0 11px;
   }
+
+  #settings-dialog {
+    position: fixed;
+    inset: auto 0 0;
+    right: 0;
+    bottom: 0;
+    left: 0;
+    width: 100%;
+    max-width: none;
+    max-height: min(94dvh, 760px);
+    margin: 0;
+    border-right: 0;
+    border-bottom: 0;
+    border-left: 0;
+    border-radius: 28px 28px 0 0;
+  }
+
+  #settings-dialog form {
+    max-height: min(94dvh, 760px);
+  }
+
+  .settings-header {
+    padding: 22px 20px 18px;
+  }
+
+  .settings-body {
+    padding: 20px 20px 6px;
+  }
+
+  #prompt-templates {
+    grid-template-columns: minmax(0, 1fr);
+  }
+
+  #settings-notice {
+    margin-right: 20px;
+    margin-left: 20px;
+  }
+
+  .settings-actions {
+    display: grid;
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+    padding: 16px 20px calc(16px + env(safe-area-inset-bottom));
+  }
+
+  .settings-actions-spacer {
+    display: none;
+  }
+
+  #settings-reset {
+    grid-column: 1 / -1;
+    justify-self: start;
+  }
+
+  #settings-cancel,
+  #settings-save {
+    width: 100%;
+  }
 }
 
 @media (max-width: 370px) {
   .brand-caption,
   .connection-pill span:last-child {
+    display: none;
+  }
+
+  .settings-button {
+    width: 36px;
+    padding: 0;
+  }
+
+  .settings-button span:last-child {
     display: none;
   }
 }

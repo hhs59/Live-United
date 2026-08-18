@@ -1,3 +1,9 @@
+import {
+  DEFAULT_SETTINGS,
+  MAX_PROMPT_LENGTH,
+  VOICES,
+} from './settings.js';
+
 const LIVE_MODEL = 'gemini-3.1-flash-live-preview';
 const LIVE_WS_URL =
   'wss://generativelanguage.googleapis.com/ws/' +
@@ -5,7 +11,8 @@ const LIVE_WS_URL =
   'BidiGenerateContentConstrained';
 const INPUT_SAMPLE_RATE = 16000;
 const OUTPUT_SAMPLE_RATE = 24000;
-const OUTPUT_VOICE = 'Kore';
+const DEFAULT_VOICE = DEFAULT_SETTINGS.voiceId;
+const ALLOWED_VOICE_IDS = new Set(VOICES.map((voice) => voice.id));
 const AUDIO_WORKLET_NAME = 'uni-pcm-capture';
 const FALLBACK_SYSTEM_PROMPT = [
   'Bạn là Uni, linh vật Live United.',
@@ -116,6 +123,44 @@ function getServerError(response) {
   return 'The Gemini Live API closed the connection.';
 }
 
+function normalizeSessionConfig(sessionConfig) {
+  const source = sessionConfig && typeof sessionConfig === 'object'
+    ? sessionConfig
+    : {};
+  const systemPrompt = typeof source.systemPrompt === 'string'
+    ? source.systemPrompt.trim()
+    : '';
+
+  if (systemPrompt.length > MAX_PROMPT_LENGTH) {
+    throw new RangeError(
+      `The chatbot prompt must be ${MAX_PROMPT_LENGTH} characters or fewer.`,
+    );
+  }
+
+  return {
+    voiceName: ALLOWED_VOICE_IDS.has(source.voiceName)
+      ? source.voiceName
+      : DEFAULT_VOICE,
+    systemPrompt,
+  };
+}
+
+function composeSystemPrompt(basePrompt, customPrompt) {
+  const base = typeof basePrompt === 'string' && basePrompt.trim()
+    ? basePrompt.trim()
+    : FALLBACK_SYSTEM_PROMPT;
+  const custom = typeof customPrompt === 'string' ? customPrompt.trim() : '';
+
+  if (!custom) return base;
+
+  return [
+    base,
+    'USER-CONFIGURED PERSONA AND TASK STYLE:',
+    custom,
+    'Continue to obey the base Vietnamese voice rules above.',
+  ].join('\n\n');
+}
+
 /**
  * Create one browser-side Gemini Live session.
  *
@@ -129,6 +174,7 @@ export function createLiveSession(callbacks = {}) {
   let isCapturing = false;
   let stopRequested = false;
   let operationId = 0;
+  let tokenRequestController = null;
 
   let audioContext = null;
   let microphoneStream = null;
@@ -274,7 +320,7 @@ export function createLiveSession(callbacks = {}) {
     }
   }
 
-  function sendSetup(model, systemPrompt) {
+  function sendSetup(model, systemPrompt, voiceName) {
     return send({
       setup: {
         model: 'models/' + model,
@@ -284,7 +330,7 @@ export function createLiveSession(callbacks = {}) {
             languageCode: 'vi-VN',
             voiceConfig: {
               prebuiltVoiceConfig: {
-                voiceName: OUTPUT_VOICE,
+                voiceName,
               },
             },
           },
@@ -308,9 +354,14 @@ export function createLiveSession(callbacks = {}) {
     });
   }
 
-  async function connect() {
+  async function connect(sessionConfig = {}) {
+    const normalizedConfig = normalizeSessionConfig(sessionConfig);
+
     if (setupReady && websocket?.readyState === WebSocket.OPEN) return;
     if (connectPromise) return connectPromise.promise;
+
+    stopRequested = false;
+    const connectionOperation = operationId;
 
     let resolveConnect;
     let rejectConnect;
@@ -322,21 +373,37 @@ export function createLiveSession(callbacks = {}) {
     // Store the promise and its callbacks so setup errors can fail it.
     connectPromise = { promise, resolve: resolveConnect, reject: rejectConnect };
     setupReady = false;
+    const requestController = new AbortController();
+    tokenRequestController = requestController;
 
     try {
-      const tokenResponse = await fetch('/api/live-token', { method: 'POST' });
+      const tokenResponse = await fetch('/api/live-token', {
+        method: 'POST',
+        signal: requestController.signal,
+      });
       const tokenData = await tokenResponse.json();
 
       if (!tokenResponse.ok || !tokenData.token) {
         throw new Error(tokenData.error || 'Unable to create a Gemini Live session.');
       }
 
+      if (connectionOperation !== operationId || stopRequested) return;
+
       const accessToken = encodeURIComponent(tokenData.token);
       websocket = new WebSocket(LIVE_WS_URL + '?access_token=' + accessToken);
 
       websocket.onopen = () => {
         callbacks.onConnecting?.();
-        if (!sendSetup(tokenData.model || LIVE_MODEL, tokenData.system_prompt)) {
+        const systemPrompt = composeSystemPrompt(
+          tokenData.system_prompt,
+          normalizedConfig.systemPrompt,
+        );
+
+        if (!sendSetup(
+          tokenData.model || LIVE_MODEL,
+          systemPrompt,
+          normalizedConfig.voiceName,
+        )) {
           rejectConnect(new Error('Unable to send the Gemini Live configuration.'));
         }
       };
@@ -353,7 +420,10 @@ export function createLiveSession(callbacks = {}) {
       websocket.onclose = (event) => {
         const stoppedByUser = stopRequested;
         const error = new Error(event.reason || 'The Gemini Live session ended.');
-        if (!setupReady) rejectConnect(error);
+        if (!setupReady) {
+          if (stoppedByUser) resolveConnect();
+          else rejectConnect(error);
+        }
         stopRequested = false;
         setupReady = false;
         websocket = null;
@@ -368,6 +438,14 @@ export function createLiveSession(callbacks = {}) {
 
       await promise;
     } catch (error) {
+      if (
+        stopRequested &&
+        connectionOperation !== operationId &&
+        error?.name === 'AbortError'
+      ) {
+        return;
+      }
+
       if (websocket) {
         try {
           websocket.close();
@@ -377,7 +455,12 @@ export function createLiveSession(callbacks = {}) {
       setupReady = false;
       throw error;
     } finally {
-      connectPromise = null;
+      if (tokenRequestController === requestController) {
+        tokenRequestController = null;
+      }
+      if (connectPromise?.promise === promise) {
+        connectPromise = null;
+      }
     }
   }
 
@@ -446,9 +529,9 @@ export function createLiveSession(callbacks = {}) {
     microphoneStream = null;
   }
 
-  async function startListening() {
+  async function startListening(sessionConfig = {}) {
     const currentOperation = ++operationId;
-    await connect();
+    await connect(sessionConfig);
     if (currentOperation !== operationId || !setupReady) return;
 
     await ensureAudioCapture();
@@ -464,6 +547,8 @@ export function createLiveSession(callbacks = {}) {
   function stopSession() {
     operationId += 1;
     stopRequested = true;
+    const wasConnecting = Boolean(connectPromise && !websocket);
+    tokenRequestController?.abort();
     stopCapture();
     stopPlayback(true);
 
@@ -478,6 +563,11 @@ export function createLiveSession(callbacks = {}) {
       return;
     }
 
+    if (wasConnecting) {
+      callbacks.onStopped?.();
+      return;
+    }
+
     stopRequested = false;
     websocket = null;
     setupReady = false;
@@ -487,6 +577,7 @@ export function createLiveSession(callbacks = {}) {
   function destroy() {
     operationId += 1;
     stopRequested = true;
+    tokenRequestController?.abort();
     stopCapture();
     stopPlayback();
     if (websocket) {
