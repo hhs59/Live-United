@@ -1,6 +1,10 @@
 /**
- * Avatar states enum.
+ * Voice state and status presentation.
+ *
+ * The avatar pixels are rendered by the provider image plus the renderer
+ * modules. This module only owns voice state and status presentation.
  */
+
 export const STATES = {
   IDLE: 'idle',
   LISTENING: 'listening',
@@ -9,20 +13,6 @@ export const STATES = {
   ERROR: 'error',
 };
 
-/**
- * Map states to avatar image paths.
- */
-const IMAGES = {
-  [STATES.IDLE]: 'assets/uni-idle.jpg',
-  [STATES.LISTENING]: 'assets/uni-listening.jpg',
-  [STATES.THINKING]: 'assets/uni-thinking.jpg',
-  [STATES.SPEAKING]: 'assets/uni-speaking.jpg',
-  [STATES.ERROR]: 'assets/uni-error.jpg',
-};
-
-/**
- * Map states to status text messages.
- */
 const STATUS_TEXTS = {
   [STATES.IDLE]: '',
   [STATES.LISTENING]: '',
@@ -41,11 +31,7 @@ const STATE_LABELS = {
 
 let currentState = STATES.IDLE;
 
-/**
- * Set the avatar state, updating the image, CSS classes, and status text.
- * @param {string} state - One of STATES values
- * @param {string} [customStatusText] - Optional override for status text
- */
+/** Set the voice state, status text, and CSS state class. */
 export function setState(state, customStatusText) {
   if (!Object.values(STATES).includes(state)) {
     console.warn(`Invalid avatar state: ${state}`);
@@ -53,62 +39,23 @@ export function setState(state, customStatusText) {
   }
 
   currentState = state;
-
   const container = document.getElementById('avatar-container');
-  const img = document.getElementById('avatar-img');
   const statusText = document.getElementById('status-text');
   const soundWave = document.getElementById('sound-wave');
   const stateLabel = document.getElementById('state-label');
 
-  if (!container || !img || !statusText) {
-    console.warn('Avatar DOM elements not found');
+  if (!container || !statusText) {
+    console.warn('Avatar status DOM elements not found');
     return;
   }
 
-  // Remove all state classes
-  Object.values(STATES).forEach(s => container.classList.remove(s));
-  // Add new state class
+  Object.values(STATES).forEach((candidate) => container.classList.remove(candidate));
   container.classList.add(state);
-
-  // Swap image
-  img.src = IMAGES[state];
-  img.alt = `Uni mascot - ${state}`;
-
-  // Update status text
   statusText.textContent = customStatusText || STATUS_TEXTS[state];
-
   if (stateLabel) stateLabel.textContent = STATE_LABELS[state];
-
-  // Toggle sound wave visibility
-  if (soundWave) {
-    if (state === STATES.LISTENING) {
-      soundWave.classList.add('active');
-    } else {
-      soundWave.classList.remove('active');
-    }
-  }
+  soundWave?.classList.toggle('active', state === STATES.LISTENING);
 }
 
-/**
- * Get the current avatar state.
- * @returns {string} Current state
- */
 export function getState() {
   return currentState;
-}
-
-/**
- * Preload all avatar images to avoid flicker on first state change.
- * @returns {Promise<void>}
- */
-export function preloadImages() {
-  const promises = Object.values(IMAGES).map(src => {
-    return new Promise((resolve) => {
-      const img = new Image();
-      img.onload = resolve;
-      img.onerror = resolve; // Don't block on missing images
-      img.src = src;
-    });
-  });
-  return Promise.all(promises);
 }

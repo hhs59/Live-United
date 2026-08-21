@@ -3,6 +3,7 @@ import {
   MAX_PROMPT_LENGTH,
   VOICES,
 } from './settings.js';
+import { getBackendUrl } from './backend_api.js';
 
 const LIVE_MODEL = 'gemini-3.1-flash-live-preview';
 const LIVE_WS_URL =
@@ -68,6 +69,7 @@ const WORKLET_SOURCE = [
   'registerProcessor("uni-pcm-capture", UniPcmCaptureProcessor);',
 ].join('\n');
 
+//check if the browser is supported or not
 export function isLiveAudioSupported() {
   return Boolean(
     typeof window !== 'undefined' &&
@@ -78,6 +80,7 @@ export function isLiveAudioSupported() {
   );
 }
 
+//convert microphone PCM data into Base64
 function encodeBase64(arrayBuffer) {
   const bytes = new Uint8Array(arrayBuffer);
   let binary = '';
@@ -90,6 +93,7 @@ function encodeBase64(arrayBuffer) {
   return btoa(binary);
 }
 
+//convert Gemini's respond into PCM 16
 function decodePcm16(base64) {
   const binary = atob(base64);
   const pcm = new Int16Array(Math.floor(binary.length / 2));
@@ -116,20 +120,7 @@ function getServerError(response) {
   return 'The Gemini Live API closed the connection.';
 }
 
-function getBackendUrl(path) {
-  const configuredOrigin = typeof window !== 'undefined'
-    ? window.UNI_BACKEND_URL
-    : '';
-  const fallbackOrigin = typeof window !== 'undefined' && window.location.hostname
-    ? `${window.location.protocol}//${window.location.hostname}:3000`
-    : 'http://localhost:3000';
-  const origin = typeof configuredOrigin === 'string' && configuredOrigin.trim()
-    ? configuredOrigin.trim()
-    : fallbackOrigin;
-
-  return origin.replace(/\/$/, '') + path;
-}
-
+//normalize teh prompts and voice before connecting to Gemini
 function normalizeSessionConfig(sessionConfig) {
   const source = sessionConfig && typeof sessionConfig === 'object'
     ? sessionConfig
@@ -152,6 +143,7 @@ function normalizeSessionConfig(sessionConfig) {
   };
 }
 
+//conbime the custom prompt with the base prompt
 function composeSystemPrompt(basePrompt, customPrompt) {
   const base = typeof basePrompt === 'string' ? basePrompt.trim() : '';
   const custom = typeof customPrompt === 'string' ? customPrompt.trim() : '';
@@ -168,6 +160,40 @@ function composeSystemPrompt(basePrompt, customPrompt) {
     custom,
     'Continue to obey the base Vietnamese voice rules above.',
   ].join('\n\n');
+}
+
+/**
+ * Normalize one playback RMS sample against the current response peak.
+ *
+ * This is intentionally pure: the caller owns the returned state, which makes
+ * the audio-to-avatar mapping testable without Web Audio. Mouth motion itself
+ * is smoothed once by avatar_mouth.js, not here.
+ */
+export function normalizePlaybackLevel(rms, state = {}, options = {}) {
+  const numericRms = Number(rms);
+  const sample = Number.isFinite(numericRms) ? Math.max(0, numericRms) : 0;
+  const noiseFloor = Number.isFinite(Number(options.noiseFloor))
+    ? Math.max(0, Number(options.noiseFloor))
+    : 0.005;
+  const minimumPeak = Number.isFinite(Number(options.minimumPeak))
+    ? Math.max(noiseFloor + 0.001, Number(options.minimumPeak))
+    : 0.05;
+  const peakRelease = Number.isFinite(Number(options.peakRelease))
+    ? Math.min(1, Math.max(0.9, Number(options.peakRelease)))
+    : 0.995;
+  const previousPeak = Number.isFinite(Number(state.responsePeak))
+    ? Math.max(0, Number(state.responsePeak))
+    : 0;
+  const responsePeak = Math.max(sample, previousPeak * peakRelease);
+  const denominator = Math.max(minimumPeak, responsePeak) - noiseFloor;
+  const level = denominator > 0
+    ? Math.min(1, Math.max(0, (sample - noiseFloor) / denominator))
+    : 0;
+
+  return {
+    level,
+    state: { responsePeak },
+  };
 }
 
 /**
@@ -193,10 +219,18 @@ export function createLiveSession(callbacks = {}) {
   let workletUrl = null;
 
   let playbackSources = new Set();
+  let playbackAnalyser = null;
+  let playbackAnalyserData = null;
+  let playbackLevelFrame = null;
+  let playbackLevelGeneration = 0;
+  let playbackLevelState = { responsePeak: 0 };
+  let playbackAnalyserWarningShown = false;
   let nextPlaybackTime = 0;
   let playbackGeneration = 0;
   let turnCompletePending = false;
   let responseStarted = false;
+  let activeSessionConfig = null;
+  let suppressCloseNotification = false;
 
   function reportError(error) {
     const message = error instanceof Error ? error.message : String(error);
@@ -204,15 +238,84 @@ export function createLiveSession(callbacks = {}) {
     callbacks.onError?.(message);
   }
 
+  //send JSON messages to Gemini's websocket
   function send(message) {
     if (websocket?.readyState !== WebSocket.OPEN) return false;
     websocket.send(JSON.stringify(message));
     return true;
   }
 
+  //create analyzer for mouth movement
+  function ensurePlaybackAnalyser() {
+    if (!audioContext || playbackAnalyser) return;
+
+    try {
+      playbackAnalyser = audioContext.createAnalyser();
+      playbackAnalyser.fftSize = 256;
+      // Keep the analyser responsive; avatar_mouth.js owns the only visible
+      // attack/release envelope.
+      playbackAnalyser.smoothingTimeConstant = 0;
+      playbackAnalyserData = new Uint8Array(playbackAnalyser.fftSize);
+      playbackAnalyser.connect(audioContext.destination);
+    } catch (error) {
+      playbackAnalyser = null;
+      playbackAnalyserData = null;
+      if (!playbackAnalyserWarningShown) {
+        console.warn('Avatar audio visualizer unavailable; continuing with voice only.', error);
+        playbackAnalyserWarningShown = true;
+      }
+    }
+  }
+
+  function stopPlaybackLevelLoop() {
+    if (playbackLevelFrame !== null) {
+      cancelAnimationFrame(playbackLevelFrame);
+      playbackLevelFrame = null;
+    }
+
+    playbackLevelGeneration += 1;
+    playbackLevelState = { responsePeak: 0 };
+    callbacks.onAudioLevel?.(0);
+  }
+
+  // Calculate the playback level used by the local mouth overlay.
+  function readPlaybackLevel(generation) {
+    if (
+      generation !== playbackLevelGeneration ||
+      !playbackAnalyser ||
+      !playbackAnalyserData
+    ) {
+      return;
+    }
+
+    playbackAnalyser.getByteTimeDomainData(playbackAnalyserData);
+
+    let sum = 0;
+    for (const value of playbackAnalyserData) {
+      const sample = (value - 128) / 128;
+      sum += sample * sample;
+    }
+
+    const rms = Math.sqrt(sum / playbackAnalyserData.length);
+    const normalized = normalizePlaybackLevel(rms, playbackLevelState);
+    playbackLevelState = normalized.state;
+    callbacks.onAudioLevel?.(normalized.level);
+
+    playbackLevelFrame = requestAnimationFrame(() => readPlaybackLevel(generation));
+  }
+
+  function startPlaybackLevelLoop() {
+    ensurePlaybackAnalyser();
+    if (!playbackAnalyser || playbackLevelFrame !== null) return;
+
+    const generation = ++playbackLevelGeneration;
+    playbackLevelFrame = requestAnimationFrame(() => readPlaybackLevel(generation));
+  }
+
   function maybeFinishTurn() {
     if (!turnCompletePending || playbackSources.size > 0) return;
 
+    stopPlaybackLevelLoop();
     turnCompletePending = false;
     responseStarted = false;
     callbacks.onTurnComplete?.();
@@ -220,6 +323,7 @@ export function createLiveSession(callbacks = {}) {
 
   function stopPlayback(notify = false) {
     playbackGeneration += 1;
+    stopPlaybackLevelLoop();
 
     for (const source of playbackSources) {
       try {
@@ -236,10 +340,12 @@ export function createLiveSession(callbacks = {}) {
   }
 
   function enqueueAudio(base64Audio) {
-    if (!audioContext) return;
-
     const pcm = decodePcm16(base64Audio);
     if (!pcm.length) return;
+
+    if (!audioContext) return;
+
+    ensurePlaybackAnalyser();
 
     // Once Uni starts responding, stop sending microphone audio to avoid
     // feeding speaker echo back into the same Live session.
@@ -253,6 +359,7 @@ export function createLiveSession(callbacks = {}) {
 
     if (!responseStarted) {
       responseStarted = true;
+      playbackLevelState = { responsePeak: 0 };
       callbacks.onAudioStart?.();
     }
 
@@ -264,7 +371,7 @@ export function createLiveSession(callbacks = {}) {
 
     const source = audioContext.createBufferSource();
     source.buffer = buffer;
-    source.connect(audioContext.destination);
+    source.connect(playbackAnalyser || audioContext.destination);
 
     const generation = playbackGeneration;
     const startAt = Math.max(nextPlaybackTime, audioContext.currentTime + 0.02);
@@ -279,6 +386,7 @@ export function createLiveSession(callbacks = {}) {
     };
 
     source.start(startAt);
+    startPlaybackLevelLoop();
   }
 
   async function handleMessage(event) {
@@ -363,11 +471,69 @@ export function createLiveSession(callbacks = {}) {
     });
   }
 
+  //check two sessions if the same or not
+  function hasSameSessionConfig(left, right) {
+    return Boolean(
+      left &&
+      right &&
+      left.voiceName === right.voiceName &&
+      left.systemPrompt === right.systemPrompt
+    );
+  }
+
+  //close the current session because changed settings
+  async function closeForConfigurationChange() {
+    stopRequested = true;
+    suppressCloseNotification = true;
+    stopCapture();
+    stopPlayback();
+
+    const socket = websocket;
+    if (!socket || ![WebSocket.OPEN, WebSocket.CONNECTING].includes(socket.readyState)) {
+      websocket = null;
+      setupReady = false;
+      activeSessionConfig = null;
+      suppressCloseNotification = false;
+      stopRequested = false;
+      return;
+    }
+
+    await new Promise((resolve) => {
+      let settled = false;
+      const finish = () => {
+        if (settled) return;
+        settled = true;
+        resolve();
+      };
+      const existingOnClose = socket.onclose;
+      socket.onclose = (event) => {
+        existingOnClose?.(event);
+        finish();
+      };
+
+      try {
+        socket.close(1000, 'Settings changed');
+      } catch (_) {
+        finish();
+      }
+    });
+
+    websocket = null;
+    setupReady = false;
+    activeSessionConfig = null;
+    suppressCloseNotification = false;
+    stopRequested = false;
+  }
+
   async function connect(sessionConfig = {}) {
     const normalizedConfig = normalizeSessionConfig(sessionConfig);
 
-    if (setupReady && websocket?.readyState === WebSocket.OPEN) return;
     if (connectPromise) return connectPromise.promise;
+
+    if (setupReady && websocket?.readyState === WebSocket.OPEN) {
+      if (hasSameSessionConfig(activeSessionConfig, normalizedConfig)) return;
+      await closeForConfigurationChange();
+    }
 
     stopRequested = false;
     const connectionOperation = operationId;
@@ -420,6 +586,8 @@ export function createLiveSession(callbacks = {}) {
           normalizedConfig.voiceName,
         )) {
           rejectConnect(new Error('Unable to send the Gemini Live configuration.'));
+        } else {
+          activeSessionConfig = normalizedConfig;
         }
       };
 
@@ -441,9 +609,11 @@ export function createLiveSession(callbacks = {}) {
         }
         stopRequested = false;
         setupReady = false;
+        activeSessionConfig = null;
         websocket = null;
         stopCapture();
         stopPlayback();
+        if (suppressCloseNotification) return;
         if (stoppedByUser) {
           callbacks.onStopped?.();
         } else {
@@ -468,6 +638,7 @@ export function createLiveSession(callbacks = {}) {
       }
       websocket = null;
       setupReady = false;
+      activeSessionConfig = null;
       throw error;
     } finally {
       if (tokenRequestController === requestController) {
@@ -483,6 +654,7 @@ export function createLiveSession(callbacks = {}) {
     if (microphoneStream && captureNode) return;
 
     audioContext ||= new AudioContext();
+    ensurePlaybackAnalyser();
     await audioContext.resume();
 
     microphoneStream = await navigator.mediaDevices.getUserMedia({
@@ -586,6 +758,7 @@ export function createLiveSession(callbacks = {}) {
     stopRequested = false;
     websocket = null;
     setupReady = false;
+    activeSessionConfig = null;
     callbacks.onStopped?.();
   }
 
@@ -602,11 +775,17 @@ export function createLiveSession(callbacks = {}) {
     }
     websocket = null;
     setupReady = false;
+    activeSessionConfig = null;
     if (workletUrl) {
       URL.revokeObjectURL(workletUrl);
       workletUrl = null;
     }
     if (audioContext) {
+      try {
+        playbackAnalyser?.disconnect();
+      } catch (_) { }
+      playbackAnalyser = null;
+      playbackAnalyserData = null;
       audioContext.close().catch(() => { });
       audioContext = null;
     }
