@@ -218,10 +218,7 @@ button {
 }
 
 .settings-button:focus-visible,
-#settings-dialog button:focus-visible,
-#settings-dialog input:focus-visible,
-#settings-dialog textarea:focus-visible,
-#settings-dialog select:focus-visible {
+#settings-dialog :is(button, input, textarea, select):focus-visible {
   outline: 3px solid rgba(237, 116, 21, 0.3);
   outline-offset: 3px;
 }
@@ -490,9 +487,7 @@ button {
   margin-top: 0;
 }
 
-#settings-dialog input,
-#settings-dialog textarea,
-#settings-dialog select {
+#settings-dialog :is(input, textarea, select) {
   display: block;
   width: 100%;
   color: var(--ink);
@@ -523,23 +518,18 @@ button {
   cursor: pointer;
 }
 
-#settings-dialog input:hover,
-#settings-dialog textarea:hover,
-#settings-dialog select:hover {
+#settings-dialog :is(input, textarea, select):hover {
   border-color: rgba(24, 87, 149, 0.34);
 }
 
-#settings-dialog input:focus,
-#settings-dialog textarea:focus,
-#settings-dialog select:focus {
+#settings-dialog :is(input, textarea, select):focus {
   border-color: var(--blue);
   outline: 0;
   background: #fff;
   box-shadow: 0 0 0 4px rgba(24, 87, 149, 0.1);
 }
 
-#settings-dialog input[aria-invalid='true'],
-#settings-dialog textarea[aria-invalid='true'] {
+#settings-dialog :is(input, textarea)[aria-invalid='true'] {
   border-color: var(--red);
   box-shadow: 0 0 0 4px rgba(189, 90, 83, 0.1);
 }
@@ -816,21 +806,25 @@ button {
   width: 100%;
 }
 
-.mic-button {
+.mic-button,
+.stop-button {
   display: inline-flex;
   align-items: center;
   justify-content: center;
-  gap: 10px;
-  width: 178px;
   min-height: 58px;
-  padding: 0 17px;
   color: #fff;
   cursor: pointer;
   border: 0;
   border-radius: 19px;
+  transition: transform 0.25s var(--ease), box-shadow 0.25s var(--ease), background 0.25s ease;
+}
+
+.mic-button {
+  gap: 10px;
+  width: 178px;
+  padding: 0 17px;
   background: linear-gradient(135deg, var(--orange), #f59229);
   box-shadow: 0 10px 24px rgba(237, 116, 21, 0.3);
-  transition: transform 0.25s var(--ease), box-shadow 0.25s var(--ease), background 0.25s ease;
 }
 
 .mic-button:hover {
@@ -891,20 +885,11 @@ button {
 }
 
 .stop-button {
-  display: inline-flex;
-  align-items: center;
-  justify-content: center;
   gap: 8px;
   min-width: 178px;
-  min-height: 58px;
   padding: 0 14px;
-  color: #fff;
-  cursor: pointer;
-  border: 0;
-  border-radius: 19px;
   background: linear-gradient(135deg, #b94f49, #d26955);
   box-shadow: 0 10px 24px rgba(185, 79, 73, 0.28);
-  transition: background 0.25s ease, box-shadow 0.25s ease, transform 0.25s var(--ease);
 }
 
 .stop-button:hover {
