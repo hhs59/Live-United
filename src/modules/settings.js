@@ -137,21 +137,6 @@ export function normalizeSettings(settings) {
       ? source.activePromptId
       : UNI_PROMPT.id;
 
-  // Preserve the previous single-prompt storage format during migration.
-  if (typeof source.activePromptId !== 'string') {
-    const legacyPrompt = typeof source.prompt === 'string' ? source.prompt.trim() : '';
-    if (legacyPrompt && legacyPrompt !== UNI_PROMPT.prompt && legacyPrompt.length <= MAX_PROMPT_LENGTH) {
-      const existing = customPrompts.find((prompt) => prompt.prompt === legacyPrompt);
-      if (existing) {
-        activePromptId = existing.id;
-      } else if (customPrompts.length < MAX_CUSTOM_PROMPTS) {
-        const migrated = { id: 'custom-migrated', name: 'Saved prompt', prompt: legacyPrompt };
-        customPrompts.push(migrated);
-        activePromptId = migrated.id;
-      }
-    }
-  }
-
   const activePrompt = activePromptId === UNI_PROMPT.id
     ? UNI_PROMPT
     : customPrompts.find((prompt) => prompt.id === activePromptId) || UNI_PROMPT;
@@ -220,8 +205,4 @@ export function saveSettings(settings) {
   }
 
   return normalized;
-}
-
-export function getVoiceById(voiceId) {
-  return VOICES.find((voice) => voice.id === voiceId) || null;
 }

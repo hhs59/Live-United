@@ -987,16 +987,10 @@ button {
   display: block;
 }
 
-@media (max-width: 820px) {
-  #header {
-    width: min(100% - 32px, 620px);
-    padding-top: 18px;
-  }
-}
-
 @media (max-width: 520px) {
   #header {
     width: calc(100% - 32px);
+    padding-top: 18px;
   }
 
   .header-actions {

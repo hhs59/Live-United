@@ -17,6 +17,9 @@ const AUDIO_WORKLET_NAME = 'uni-pcm-capture';
 const AUDIO_WORKLET_URL = new URL('./pcm_capture_worklet.js', import.meta.url).href;
 const AVATAR_ANIMATION_TOOL = 'play_mascot_animation';
 const AVATAR_ANIMATIONS = new Set(['wave', 'celebrate', 'emphasize', 'neutral']);
+const PLAYBACK_NOISE_FLOOR = 0.005;
+const PLAYBACK_MINIMUM_PEAK = 0.05;
+const PLAYBACK_PEAK_RELEASE = 0.995;
 
 //check if the browser is supported or not
 export function isLiveAudioSupported() {
@@ -118,26 +121,18 @@ function composeSystemPrompt(basePrompt, customPrompt) {
  * the audio-to-avatar mapping testable without Web Audio. The layered avatar
  * animator owns the visible mouth smoothing.
  */
-export function normalizePlaybackLevel(rms, state = {}, options = {}) {
+export function normalizePlaybackLevel(rms, state = {}) {
   const numericRms = Number(rms);
   const sample = Number.isFinite(numericRms) ? Math.max(0, numericRms) : 0;
-  const noiseFloor = Number.isFinite(Number(options.noiseFloor))
-    ? Math.max(0, Number(options.noiseFloor))
-    : 0.005;
-  const minimumPeak = Number.isFinite(Number(options.minimumPeak))
-    ? Math.max(noiseFloor + 0.001, Number(options.minimumPeak))
-    : 0.05;
-  const peakRelease = Number.isFinite(Number(options.peakRelease))
-    ? Math.min(1, Math.max(0.9, Number(options.peakRelease)))
-    : 0.995;
   const previousPeak = Number.isFinite(Number(state.responsePeak))
     ? Math.max(0, Number(state.responsePeak))
     : 0;
-  const responsePeak = Math.max(sample, previousPeak * peakRelease);
-  const denominator = Math.max(minimumPeak, responsePeak) - noiseFloor;
-  const level = denominator > 0
-    ? Math.min(1, Math.max(0, (sample - noiseFloor) / denominator))
-    : 0;
+  const responsePeak = Math.max(sample, previousPeak * PLAYBACK_PEAK_RELEASE);
+  const level = Math.min(1, Math.max(
+    0,
+    (sample - PLAYBACK_NOISE_FLOOR) /
+      (Math.max(PLAYBACK_MINIMUM_PEAK, responsePeak) - PLAYBACK_NOISE_FLOOR),
+  ));
 
   return {
     level,
@@ -344,6 +339,7 @@ export function createLiveSession(callbacks = {}) {
       if (functionCall.name === AVATAR_ANIMATION_TOOL) {
         const requested = functionCall.args?.animation;
         const animation = AVATAR_ANIMATIONS.has(requested) ? requested : 'neutral';
+        console.info(`[Avatar] Gemini requested gesture: ${animation}`);
         callbacks.onAvatarGesture?.(animation);
         response = { result: { status: 'played', animation } };
       } else {
@@ -445,8 +441,9 @@ export function createLiveSession(callbacks = {}) {
           functionDeclarations: [{
             name: AVATAR_ANIMATION_TOOL,
             description:
-              'Play one short local mascot gesture when it meaningfully supports the spoken reply. ' +
-              'Use at most once per reply and do not call it for every sentence.',
+              'Before speaking, call exactly once for these cases: wave for a greeting or farewell; ' +
+              'celebrate for success or congratulations; emphasize for a genuinely important instruction. ' +
+              'For an ordinary reply, do not call this tool. Never call it more than once per reply.',
             parameters: {
               type: 'OBJECT',
               properties: {

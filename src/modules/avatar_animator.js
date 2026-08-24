@@ -1,40 +1,23 @@
-const GESTURE_CLIPS = Object.freeze({
-  neutral: Object.freeze({ durationMs: 0, keyframes: Object.freeze([]) }),
-  wave: Object.freeze({
-    durationMs: 1400,
-    keyframes: Object.freeze([
-      { at: 0, arm: 0, head: 0, body: 0 },
-      { at: 0.18, arm: 1, head: 1, body: 1 },
-      { at: 0.34, arm: 0.78, head: 1, body: 1 },
-      { at: 0.5, arm: 1, head: 1, body: 1 },
-      { at: 0.66, arm: 0.78, head: 1, body: 1 },
-      { at: 0.82, arm: 1, head: 1, body: 1 },
-      { at: 1, arm: 0, head: 0, body: 0 },
-    ]),
-  }),
-  celebrate: Object.freeze({
-    durationMs: 1250,
-    keyframes: Object.freeze([
-      { at: 0, arms: 0, jump: 0, head: 0 },
-      { at: 0.18, arms: 1, jump: 1, head: 1 },
-      { at: 0.36, arms: 0.9, jump: 0, head: -0.5 },
-      { at: 0.52, arms: 1, jump: 1, head: 1 },
-      { at: 0.7, arms: 0.92, jump: 0, head: -0.5 },
-      { at: 0.84, arms: 1, jump: 0.7, head: 0.7 },
-      { at: 1, arms: 0, jump: 0, head: 0 },
-    ]),
-  }),
-  emphasize: Object.freeze({
-    durationMs: 900,
-    keyframes: Object.freeze([
-      { at: 0, arms: 0, head: 0, body: 0 },
-      { at: 0.2, arms: 1, head: 1, body: 1 },
-      { at: 0.42, arms: 0.35, head: 0.25, body: 0.2 },
-      { at: 0.62, arms: 1, head: 1, body: 0.8 },
-      { at: 1, arms: 0, head: 0, body: 0 },
-    ]),
-  }),
-});
+const GESTURE_CLIPS = {
+  neutral: { durationMs: 0, keyframes: [] },
+  wave: { durationMs: 1800, keyframes: [
+    { at: 0, arm: 0, head: 0, body: 0 }, { at: .18, arm: 1, head: 1, body: 1 },
+    { at: .34, arm: .78, head: 1, body: 1 }, { at: .5, arm: 1, head: 1, body: 1 },
+    { at: .66, arm: .78, head: 1, body: 1 }, { at: .82, arm: 1, head: 1, body: 1 },
+    { at: 1, arm: 0, head: 0, body: 0 },
+  ] },
+  celebrate: { durationMs: 1250, keyframes: [
+    { at: 0, arms: 0, jump: 0, head: 0 }, { at: .18, arms: 1, jump: 1, head: 1 },
+    { at: .36, arms: .9, jump: 0, head: -.5 }, { at: .52, arms: 1, jump: 1, head: 1 },
+    { at: .7, arms: .92, jump: 0, head: -.5 }, { at: .84, arms: 1, jump: .7, head: .7 },
+    { at: 1, arms: 0, jump: 0, head: 0 },
+  ] },
+  emphasize: { durationMs: 900, keyframes: [
+    { at: 0, arms: 0, head: 0, body: 0 }, { at: .2, arms: 1, head: 1, body: 1 },
+    { at: .42, arms: .35, head: .25, body: .2 }, { at: .62, arms: 1, head: 1, body: .8 },
+    { at: 1, arms: 0, head: 0, body: 0 },
+  ] },
+};
 
 const VALID_GESTURES = new Set(Object.keys(GESTURE_CLIPS));
 const BASE_MOTION = { breathHz: 0.64, slowHz: 0.27, mediumHz: 0.48, conversationalHz: 0.92 };
@@ -177,19 +160,7 @@ export function generateAnimationFrame(input = {}) {
   return transforms;
 }
 
-export const AVATAR_RUNTIME_STATES = Object.freeze({
-  IDLE: 'idle',
-  LISTENING: 'listening',
-  THINKING: 'thinking',
-  SPEAKING: 'speaking',
-  ERROR: 'error',
-});
-
-export const MOUTH_STATES = Object.freeze({
-  CLOSED: 'closed', SMALL: 'small', OPEN: 'open',
-});
-
-const VALID_RUNTIME_STATES = new Set(Object.values(AVATAR_RUNTIME_STATES));
+const VALID_RUNTIME_STATES = new Set(['idle', 'listening', 'thinking', 'speaking', 'error']);
 const DEFAULT_FRAME_MS = 1000 / 60;
 const STATE_BLEND_MS = 300;
 const BLINK_MIN_MS = 2600;
@@ -263,7 +234,7 @@ function blendTransformSets(from, to, amount) {
 }
 
 function resolveRuntimeState(value) {
-  return VALID_RUNTIME_STATES.has(value) ? value : AVATAR_RUNTIME_STATES.IDLE;
+  return VALID_RUNTIME_STATES.has(value) ? value : 'idle';
 }
 
 function smoothAudio(previous, target, deltaMs) {
@@ -275,8 +246,8 @@ function smoothAudio(previous, target, deltaMs) {
 }
 
 function mouthState(level, speaking) {
-  if (!speaking || level < 0.105) return MOUTH_STATES.CLOSED;
-  return level < 0.52 ? MOUTH_STATES.SMALL : MOUTH_STATES.OPEN;
+  if (!speaking || level < 0.105) return 'closed';
+  return level < 0.52 ? 'small' : 'open';
 }
 
 function updateBlink(state, timestamp, pageVisible) {
@@ -321,13 +292,13 @@ export function createAnimatorState(now = 0, random = Math.random) {
   const transforms = createTransformSet();
   const state = {
     random,
-    runtimeState: AVATAR_RUNTIME_STATES.IDLE,
+    runtimeState: 'idle',
     stateChangedAt: now,
     lastTimestamp: now,
     transitionFromTransforms: cloneTransformSet(transforms),
     transitionProgress: 1,
     audioLevel: 0,
-    mouthState: MOUTH_STATES.CLOSED,
+    mouthState: 'closed',
     blink: { phase: 'open', amount: 0, phaseStartedAt: now, nextBlinkAt: 0 },
     transforms,
   };
@@ -349,7 +320,7 @@ export function updateAnimator(state, input = {}) {
     state.transitionProgress = 0;
   }
 
-  const speaking = runtimeState === AVATAR_RUNTIME_STATES.SPEAKING;
+  const speaking = runtimeState === 'speaking';
   state.audioLevel = speaking
     ? smoothAudio(state.audioLevel, input.targetAudioLevel, deltaMs)
     : 0;

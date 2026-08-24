@@ -2,19 +2,24 @@
    App.js — Main voice-only application logic
    ============================================================ */
 
-import { createLiveSession, isLiveAudioSupported } from './modules/live.js?v=15';
-import { createLayeredAvatarRenderer } from './modules/avatar_game_renderer.js?v=14';
-import { setState, getState, STATES } from './modules/avatar.js';
+import { createLiveSession, isLiveAudioSupported } from './modules/live.js?v=16';
+import { createLayeredAvatarRenderer } from './modules/avatar_game_renderer.js?v=15';
 import {
   DEFAULT_SETTINGS,
   MAX_CUSTOM_PROMPTS,
   UNI_PROMPT,
   VOICES,
   getSettings,
-  getVoiceById,
   normalizeSettings,
   saveSettings,
 } from './modules/settings.js';
+
+const STATES = {
+  IDLE: 'idle', LISTENING: 'listening', THINKING: 'thinking', SPEAKING: 'speaking', ERROR: 'error',
+};
+const STATUS_TEXTS = {
+  idle: '', listening: '', thinking: 'Uni is thinking...', speaking: 'Speaking...', error: 'Something went wrong.',
+};
 
 const startBtn = document.getElementById('start-btn');
 const stopBtn = document.getElementById('stop-btn');
@@ -42,6 +47,9 @@ const settingsNotice = document.getElementById('settings-notice');
 const voiceBadgeLabel = document.getElementById('voice-badge-label');
 const avatarContainer = document.getElementById('avatar-container');
 const avatarCanvas = document.getElementById('avatar-game-canvas');
+const statusText = document.getElementById('status-text');
+const soundWave = document.getElementById('sound-wave');
+const stateLabel = document.getElementById('state-label');
 
 let liveSession = null;
 let avatarRenderer = null;
@@ -51,6 +59,21 @@ let savedSettings = getSettings();
 let draftSettings = null;
 let editingPromptId = null;
 let settingsCloseTimer = null;
+let pendingAvatarGesture = null;
+let currentState = STATES.IDLE;
+
+function setState(state, message) {
+  currentState = state;
+  avatarContainer.classList.remove(...Object.values(STATES));
+  avatarContainer.classList.add(state);
+  statusText.textContent = message || STATUS_TEXTS[state];
+  stateLabel.textContent = state === 'idle' ? 'READY' : state.toUpperCase();
+  soundWave.classList.toggle('active', state === STATES.LISTENING);
+}
+
+function getState() {
+  return currentState;
+}
 
 function setUiState(state, message) {
   setState(state, message);
@@ -66,9 +89,7 @@ function setControls(mode) {
 }
 
 function updateVoiceBadge(settings) {
-  if (!voiceBadgeLabel) return;
-
-  const voice = getVoiceById(settings.voiceId);
+  const voice = VOICES.find((candidate) => candidate.id === settings.voiceId);
   voiceBadgeLabel.textContent = `Voice · ${voice?.label || settings.voiceId}`;
 }
 
@@ -87,11 +108,11 @@ function createPromptId() {
 }
 
 function setSettingsNotice(message = '') {
-  if (settingsNotice) settingsNotice.textContent = message;
+  settingsNotice.textContent = message;
 }
 
 function renderPromptList() {
-  if (!promptList || !draftSettings) return;
+  if (!draftSettings) return;
 
   promptList.replaceChildren();
   const prompts = [UNI_PROMPT, ...draftSettings.customPrompts];
@@ -115,38 +136,35 @@ function renderPromptList() {
     promptList.append(button);
   }
 
-  if (promptEdit) promptEdit.hidden = draftSettings.activePromptId === UNI_PROMPT.id;
-  if (promptAdd) {
-    promptAdd.disabled = draftSettings.customPrompts.length >= MAX_CUSTOM_PROMPTS;
-    promptAdd.title = promptAdd.disabled ? `Maximum ${MAX_CUSTOM_PROMPTS} custom prompts` : '';
-  }
+  promptEdit.hidden = draftSettings.activePromptId === UNI_PROMPT.id;
+  promptAdd.disabled = draftSettings.customPrompts.length >= MAX_CUSTOM_PROMPTS;
+  promptAdd.title = promptAdd.disabled ? `Maximum ${MAX_CUSTOM_PROMPTS} custom prompts` : '';
 }
 
 function closePromptEditor() {
   editingPromptId = null;
-  if (promptEditor) promptEditor.hidden = true;
-  if (settingsPromptName) settingsPromptName.disabled = true;
-  if (settingsPrompt) settingsPrompt.disabled = true;
-  if (settingsSave) settingsSave.disabled = false;
-  if (promptError) promptError.textContent = '';
+  promptEditor.hidden = true;
+  settingsPromptName.disabled = true;
+  settingsPrompt.disabled = true;
+  settingsSave.disabled = false;
+  promptError.textContent = '';
 }
 
 function updatePromptEditorValidation() {
-  if (!settingsPrompt || !settingsPromptName || !promptEditorSave) return;
   settingsPromptName.setCustomValidity(settingsPromptName.value.trim() ? '' : 'Enter a prompt name.');
   settingsPrompt.setCustomValidity(settingsPrompt.value.trim() ? '' : 'Enter prompt instructions.');
   const valid = settingsPromptName.checkValidity() && settingsPrompt.checkValidity();
-  if (promptCount) promptCount.textContent = String(settingsPrompt.value.length);
+  promptCount.textContent = String(settingsPrompt.value.length);
   settingsPromptName.toggleAttribute('aria-invalid', !settingsPromptName.checkValidity());
   settingsPrompt.toggleAttribute('aria-invalid', !settingsPrompt.checkValidity());
-  if (promptError) promptError.textContent = valid
+  promptError.textContent = valid
     ? ''
     : settingsPromptName.validationMessage || settingsPrompt.validationMessage;
   promptEditorSave.disabled = !valid;
 }
 
 function openPromptEditor(promptId = null) {
-  if (!promptEditor || !settingsPromptName || !settingsPrompt || !draftSettings) return;
+  if (!draftSettings) return;
 
   const prompt = promptId ? getDraftPrompt(promptId) : null;
   if (promptId && (!prompt || prompt.id === UNI_PROMPT.id)) return;
@@ -157,18 +175,18 @@ function openPromptEditor(promptId = null) {
   settingsPromptName.value = prompt?.name || '';
   settingsPrompt.value = prompt?.prompt || '';
   promptEditor.hidden = false;
-  if (promptDelete) promptDelete.hidden = !editingPromptId;
-  if (promptEditorSave) promptEditorSave.textContent = editingPromptId ? 'Save prompt' : 'Add prompt';
-  if (settingsSave) settingsSave.disabled = true;
+  promptDelete.hidden = !editingPromptId;
+  promptEditorSave.textContent = editingPromptId ? 'Save prompt' : 'Add prompt';
+  settingsSave.disabled = true;
   setSettingsNotice('');
   updatePromptEditorValidation();
   settingsPromptName.focus();
 }
 
 function savePromptEditor() {
-  if (!draftSettings || !settingsPromptName || !settingsPrompt) return;
+  if (!draftSettings) return;
   updatePromptEditorValidation();
-  if (promptEditorSave?.disabled) return;
+  if (promptEditorSave.disabled) return;
 
   const record = {
     id: editingPromptId || createPromptId(),
@@ -206,8 +224,6 @@ function deleteEditedPrompt() {
 }
 
 function populateVoiceOptions() {
-  if (!settingsVoice) return;
-
   settingsVoice.replaceChildren();
   for (const voice of VOICES) {
     const option = document.createElement('option');
@@ -219,8 +235,6 @@ function populateVoiceOptions() {
 }
 
 function populateSettingsForm(settings) {
-  if (!settingsVoice) return;
-
   draftSettings = cloneSettings(settings);
   settingsVoice.value = settings.voiceId;
   closePromptEditor();
@@ -228,22 +242,18 @@ function populateSettingsForm(settings) {
 }
 
 function clearSettingsMessages() {
-  if (promptError) promptError.textContent = '';
-  if (settingsNotice) settingsNotice.textContent = '';
+  promptError.textContent = '';
+  settingsNotice.textContent = '';
 }
 
 function openSettings() {
-  if (!settingsDialog || settingsDialog.open) return;
+  if (settingsDialog.open) return;
 
   savedSettings = getSettings();
   populateSettingsForm(savedSettings);
   clearSettingsMessages();
 
-  if (typeof settingsDialog.showModal === 'function') {
-    settingsDialog.showModal();
-  } else {
-    settingsDialog.setAttribute('open', '');
-  }
+  settingsDialog.showModal();
 
   promptList?.querySelector('[aria-selected="true"]')?.focus();
 }
@@ -254,12 +264,7 @@ function closeSettings() {
     settingsCloseTimer = null;
   }
 
-  if (!settingsDialog) return;
-  if (typeof settingsDialog.close === 'function' && settingsDialog.open) {
-    settingsDialog.close();
-  } else {
-    settingsDialog.removeAttribute('open');
-  }
+  if (settingsDialog.open) settingsDialog.close();
 }
 
 function isSessionActive() {
@@ -272,7 +277,7 @@ function isSessionActive() {
 }
 
 function saveDraftSettings() {
-  if (!draftSettings || !settingsVoice) return;
+  if (!draftSettings) return;
 
   try {
     const normalized = normalizeSettings({
@@ -283,11 +288,9 @@ function saveDraftSettings() {
     savedSettings = saveSettings(normalized);
     updateVoiceBadge(savedSettings);
 
-    if (settingsNotice) {
-      settingsNotice.textContent = isSessionActive()
-        ? 'Settings saved. They will apply when you start the next session.'
-        : 'Settings saved.';
-    }
+    settingsNotice.textContent = isSessionActive()
+      ? 'Settings saved. They will apply when you start the next session.'
+      : 'Settings saved.';
 
     settingsCloseTimer = window.setTimeout(closeSettings, 700);
   } catch (error) {
@@ -300,28 +303,28 @@ function initializeSettings() {
   updateVoiceBadge(savedSettings);
 }
 
-settingsBtn?.addEventListener('click', openSettings);
-settingsClose?.addEventListener('click', closeSettings);
-settingsCancel?.addEventListener('click', closeSettings);
+settingsBtn.addEventListener('click', openSettings);
+settingsClose.addEventListener('click', closeSettings);
+settingsCancel.addEventListener('click', closeSettings);
 
-settingsDialog?.addEventListener('cancel', (event) => {
+settingsDialog.addEventListener('cancel', (event) => {
   event.preventDefault();
   closeSettings();
 });
 
-settingsDialog?.addEventListener('click', (event) => {
+settingsDialog.addEventListener('click', (event) => {
   if (event.target === settingsDialog) closeSettings();
 });
 
-settingsForm?.addEventListener('submit', (event) => {
+settingsForm.addEventListener('submit', (event) => {
   event.preventDefault();
-  if (!settingsSave?.disabled) saveDraftSettings();
+  if (!settingsSave.disabled) saveDraftSettings();
 });
 
-settingsPrompt?.addEventListener('input', updatePromptEditorValidation);
-settingsPromptName?.addEventListener('input', updatePromptEditorValidation);
+settingsPrompt.addEventListener('input', updatePromptEditorValidation);
+settingsPromptName.addEventListener('input', updatePromptEditorValidation);
 
-settingsReset?.addEventListener('click', () => {
+settingsReset.addEventListener('click', () => {
   if (!draftSettings) return;
   draftSettings.activePromptId = UNI_PROMPT.id;
   draftSettings.prompt = UNI_PROMPT.prompt;
@@ -331,7 +334,7 @@ settingsReset?.addEventListener('click', () => {
   setSettingsNotice('Default prompt and voice ready to save.');
 });
 
-promptList?.addEventListener('click', (event) => {
+promptList.addEventListener('click', (event) => {
   const button = event.target.closest('button[data-prompt-id]');
   if (!button || !promptList.contains(button) || !draftSettings) return;
   const prompt = getDraftPrompt(button.dataset.promptId);
@@ -343,14 +346,15 @@ promptList?.addEventListener('click', (event) => {
   renderPromptList();
 });
 
-promptAdd?.addEventListener('click', () => openPromptEditor());
-promptEdit?.addEventListener('click', () => openPromptEditor(draftSettings?.activePromptId));
-promptEditorCancel?.addEventListener('click', closePromptEditor);
-promptEditorSave?.addEventListener('click', savePromptEditor);
-promptDelete?.addEventListener('click', deleteEditedPrompt);
+promptAdd.addEventListener('click', () => openPromptEditor());
+promptEdit.addEventListener('click', () => openPromptEditor(draftSettings?.activePromptId));
+promptEditorCancel.addEventListener('click', closePromptEditor);
+promptEditorSave.addEventListener('click', savePromptEditor);
+promptDelete.addEventListener('click', deleteEditedPrompt);
 
 function showError(message) {
   isProcessing = false;
+  pendingAvatarGesture = null;
   startBtn.disabled = false;
   startBtn.classList.remove('active');
   setControls('idle');
@@ -386,6 +390,10 @@ function createSession() {
       avatarRenderer?.setAudioLevel(0);
       setControls('busy');
       setUiState(STATES.SPEAKING, 'Speaking...');
+      if (pendingAvatarGesture) {
+        avatarRenderer?.playGesture(pendingAvatarGesture);
+        pendingAvatarGesture = null;
+      }
     },
 
     onAudioLevel: (level) => {
@@ -393,12 +401,19 @@ function createSession() {
     },
 
     onAvatarGesture: (name) => {
-      avatarRenderer?.playGesture(name);
+      if (name === 'neutral') {
+        pendingAvatarGesture = null;
+        avatarRenderer?.playGesture(name);
+      } else if (getState() === STATES.SPEAKING) {
+        avatarRenderer?.playGesture(name);
+      } else {
+        pendingAvatarGesture = name;
+      }
     },
 
     onTurnComplete: () => {
+      pendingAvatarGesture = null;
       avatarRenderer?.setAudioLevel(0);
-      avatarRenderer?.stop();
       if (liveSession?.isListening()) return;
       isProcessing = false;
       startBtn.disabled = false;
@@ -408,6 +423,7 @@ function createSession() {
     },
 
     onInterrupted: () => {
+      pendingAvatarGesture = null;
       avatarRenderer?.setAudioLevel(0);
       if (liveSession?.isListening()) {
         startBtn.classList.add('active');
@@ -428,6 +444,7 @@ function createSession() {
     },
 
     onStopped: () => {
+      pendingAvatarGesture = null;
       isProcessing = false;
       startBtn.disabled = false;
       startBtn.classList.remove('active');
@@ -488,7 +505,7 @@ stopBtn.addEventListener('click', () => {
 
 document.addEventListener('keydown', (event) => {
   if (
-    settingsDialog?.open ||
+    settingsDialog.open ||
     ['INPUT', 'TEXTAREA', 'SELECT', 'BUTTON'].includes(event.target.tagName)
   ) return;
 

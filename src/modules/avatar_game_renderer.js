@@ -1,46 +1,48 @@
-const DEFAULT_LAYERED_AVATAR_MANIFEST_URL =
-  'assets/avatar/characters/uni-3d/manifest.json';
+const AVATAR_ASSET_URL = new URL('../assets/avatar/characters/uni-3d/', import.meta.url);
+const LAYERS = [
+  ['legLeft', 'leg-left-3d.png', 'body', 5, .445, .85],
+  ['legRight', 'leg-right-3d.png', 'body', 6, .555, .85],
+  ['armLeft', 'arm-left-3d.png', 'body', 10, .392, .64],
+  ['armRight', 'arm-right-3d.png', 'body', 11, .613, .64],
+  ['body', 'torso-3d.png', 'root', 20, .5, .75],
+  ['head', 'head-3d.png', 'body', 40, .5, .65],
+  ['eyesOpen', 'eyes-open-3d.png', 'head', 50, .5, .412],
+  ['eyesClosed', 'eyes-closed-3d.png', 'head', 50, .5, .412],
+  ['mouthClosed', 'mouth-closed-3d.png', 'head', 60, .5, .52],
+  ['mouthSmall', 'mouth-small-3d.png', 'head', 60, .5, .52],
+  ['mouthOpen', 'mouth-open-3d.png', 'head', 60, .5, .52],
+];
 
-async function loadLayeredAvatarPackage({ manifestUrl }) {
-  const response = await fetch(manifestUrl, { cache: 'no-cache' });
-  if (!response.ok) throw new Error(`Unable to load avatar manifest: HTTP ${response.status}.`);
-
-  const manifest = await response.json();
-  const baseUrl = new URL(manifestUrl, location.href);
-  const layers = await Promise.all(manifest.layers.map(async (layer, manifestIndex) => {
+async function loadLayeredAvatarPackage() {
+  const layers = await Promise.all(LAYERS.map(async ([id, asset, parent, zIndex, x, y]) => {
     const image = new Image();
     image.decoding = 'async';
-    image.src = new URL(layer.asset, baseUrl);
-    if (image.decode) await image.decode();
-    else await new Promise((resolve, reject) => {
-      image.onload = resolve;
-      image.onerror = reject;
-    });
-    return {
-      ...layer,
-      layout: layer.layout || { x: 0, y: 0, width: 1, height: 1 },
-      manifestIndex,
-      image,
-    };
+    image.src = new URL(asset, AVATAR_ASSET_URL);
+    await image.decode();
+    return { id, parent, zIndex, pivot: { x, y }, layout: { x: 0, y: 0, width: 1, height: 1 }, image };
   }));
-
   return {
-    manifest,
-    sourceWidth: manifest.canvas.width,
-    sourceHeight: manifest.canvas.height,
-    layers: layers.sort((a, b) => a.zIndex - b.zIndex || a.manifestIndex - b.manifestIndex),
-    slots: manifest.slots,
+    fit: 'contain',
+    motion: { intensity: 1, waveAngle: -100, celebrateAngle: 70 },
+    sourceWidth: 1024,
+    sourceHeight: 1024,
+    layers,
+    slots: {
+      eyes: { open: 'eyesOpen', closed: 'eyesClosed' },
+      mouth: { closed: 'mouthClosed', small: 'mouthSmall', open: 'mouthOpen' },
+    },
   };
 }
+
 import {
-  AVATAR_RUNTIME_STATES,
   createAnimatorState,
   createLayerTransforms,
   updateAnimator,
   getGestureDurationMs,
-} from './avatar_animator.js?v=12';
+} from './avatar_animator.js?v=13';
 
 const MAX_DEVICE_PIXEL_RATIO = 2;
+const VALID_STATES = new Set(['idle', 'listening', 'thinking', 'speaking', 'error']);
 const VALID_GESTURES = new Set(['neutral', 'wave', 'celebrate', 'emphasize']);
 
 function identityMatrix() {
@@ -132,9 +134,7 @@ function computeFitMatrix(sourceWidth, sourceHeight, targetWidth, targetHeight, 
 }
 
 function isRenderableState(state) {
-  return Object.values(AVATAR_RUNTIME_STATES).includes(state)
-    ? state
-    : AVATAR_RUNTIME_STATES.IDLE;
+  return VALID_STATES.has(state) ? state : 'idle';
 }
 
 function resolveRenderLayers(layers, gesture) {
@@ -166,13 +166,11 @@ class LayeredAvatarRenderer {
   constructor(options = {}) {
     this.canvas = options.canvas || null;
     this.container = options.container || this.canvas?.parentElement || null;
-    this.manifestUrl = options.manifestUrl || DEFAULT_LAYERED_AVATAR_MANIFEST_URL;
-    this.loadPackage = options.loadPackage || loadLayeredAvatarPackage;
     this.onError = options.onError || null;
     this.packageDefinition = null;
     this.context = null;
     this.animationFrame = null;
-    this.runtimeState = AVATAR_RUNTIME_STATES.IDLE;
+    this.runtimeState = 'idle';
     this.targetAudioLevel = 0;
     this.gesture = 'neutral';
     this.gestureStartedAt = 0;
@@ -209,9 +207,7 @@ class LayeredAvatarRenderer {
     }
 
     try {
-      this.packageDefinition = await this.loadPackage({
-        manifestUrl: this.manifestUrl,
-      });
+      this.packageDefinition = await loadLayeredAvatarPackage();
       this.resize(true);
       this.ready = true;
       globalThis.document?.addEventListener?.('visibilitychange', this.handleVisibilityChange);
@@ -323,11 +319,11 @@ class LayeredAvatarRenderer {
         runtimeState: this.runtimeState,
         targetAudioLevel: this.targetAudioLevel,
         reducedMotion: Boolean(this.reducedMotionQuery?.matches),
-        intensity: packageDefinition.manifest.motion.intensity,
+        intensity: packageDefinition.motion.intensity,
         gesture: this.gesture,
         gestureElapsedMs: Math.max(0, timestamp - this.gestureStartedAt),
         gestureDurationMs: this.gestureDurationMs,
-        motion: packageDefinition.manifest.motion,
+        motion: packageDefinition.motion,
       });
 
       const localTransforms = createLayerTransforms(this.animator, packageDefinition);
@@ -338,7 +334,7 @@ class LayeredAvatarRenderer {
           packageDefinition.sourceHeight,
           this.lastCssWidth,
           this.lastCssHeight,
-          packageDefinition.manifest.fit,
+          packageDefinition.fit,
         ),
       );
       const worldById = resolveWorldMatrices(
