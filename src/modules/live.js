@@ -15,8 +15,6 @@ const DEFAULT_VOICE = DEFAULT_SETTINGS.voiceId;
 const ALLOWED_VOICE_IDS = new Set(VOICES.map((voice) => voice.id));
 const AUDIO_WORKLET_NAME = 'uni-pcm-capture';
 const AUDIO_WORKLET_URL = new URL('./pcm_capture_worklet.js', import.meta.url).href;
-const AVATAR_ANIMATION_TOOL = 'play_mascot_animation';
-const AVATAR_ANIMATIONS = new Set(['wave', 'celebrate', 'emphasize', 'neutral']);
 const PLAYBACK_NOISE_FLOOR = 0.005;
 const PLAYBACK_MINIMUM_PEAK = 0.05;
 const PLAYBACK_PEAK_RELEASE = 0.995;
@@ -140,6 +138,29 @@ export function normalizePlaybackLevel(rms, state = {}) {
   };
 }
 
+// Select an optional local gesture from Gemini's spoken response transcript.
+// This intentionally stays client-side: replying to an animation tool call can
+// make the Live API generate the same spoken answer a second time.
+export function inferAvatarGesture(transcript) {
+  const text = typeof transcript === 'string'
+    ? transcript.toLocaleLowerCase('vi-VN')
+    : '';
+
+  if (/\b(chúc mừng|tuyệt vời|thành công|làm tốt lắm)\b/u.test(text)) {
+    return 'celebrate';
+  }
+
+  if (/\b(xin chào|chào bạn|tạm biệt|hẹn gặp lại)\b/u.test(text)) {
+    return 'wave';
+  }
+
+  if (/\b(lưu ý|quan trọng|hãy nhớ|đừng quên)\b/u.test(text)) {
+    return 'emphasize';
+  }
+
+  return null;
+}
+
 /**
  * Create one browser-side Gemini Live session.
  *
@@ -172,6 +193,8 @@ export function createLiveSession(callbacks = {}) {
   let playbackGeneration = 0;
   let turnCompletePending = false;
   let responseStarted = false;
+  let responseTranscript = '';
+  let responseGesture = null;
   let activeSessionConfig = null;
   let suppressCloseNotification = false;
 
@@ -261,6 +284,8 @@ export function createLiveSession(callbacks = {}) {
     stopPlaybackLevelLoop();
     turnCompletePending = false;
     responseStarted = false;
+    responseTranscript = '';
+    responseGesture = null;
     callbacks.onTurnComplete?.();
   }
 
@@ -277,6 +302,8 @@ export function createLiveSession(callbacks = {}) {
     playbackSources.clear();
     turnCompletePending = false;
     responseStarted = false;
+    responseTranscript = '';
+    responseGesture = null;
     nextPlaybackTime = audioContext ? audioContext.currentTime : 0;
 
     if (notify) callbacks.onPlaybackInterrupted?.();
@@ -332,32 +359,6 @@ export function createLiveSession(callbacks = {}) {
     startPlaybackLevelLoop();
   }
 
-  function handleToolCall(toolCall) {
-    const functionResponses = [];
-    for (const functionCall of toolCall?.functionCalls || []) {
-      let response;
-      if (functionCall.name === AVATAR_ANIMATION_TOOL) {
-        const requested = functionCall.args?.animation;
-        const animation = AVATAR_ANIMATIONS.has(requested) ? requested : 'neutral';
-        console.info(`[Avatar] Gemini requested gesture: ${animation}`);
-        callbacks.onAvatarGesture?.(animation);
-        response = { result: { status: 'played', animation } };
-      } else {
-        response = { error: `Unsupported local tool: ${functionCall.name}` };
-      }
-
-      functionResponses.push({
-        id: functionCall.id,
-        name: functionCall.name,
-        response,
-      });
-    }
-
-    if (functionResponses.length) {
-      send({ toolResponse: { functionResponses } });
-    }
-  }
-
   async function handleMessage(event) {
     const raw = typeof event.data === 'string' ? event.data : await event.data.text();
     let response;
@@ -385,8 +386,6 @@ export function createLiveSession(callbacks = {}) {
       return;
     }
 
-    if (response.toolCall) handleToolCall(response.toolCall);
-
     const serverContent = response.serverContent;
     if (!serverContent) return;
 
@@ -399,6 +398,17 @@ export function createLiveSession(callbacks = {}) {
       const inlineData = part.inlineData || part.inline_data;
       if (inlineData?.data) {
         enqueueAudio(inlineData.data);
+      }
+    }
+
+    const transcription =
+      serverContent.outputTranscription || serverContent.output_transcription;
+    if (typeof transcription?.text === 'string') {
+      responseTranscript += transcription.text;
+      const gesture = inferAvatarGesture(responseTranscript);
+      if (gesture && gesture !== responseGesture) {
+        responseGesture = gesture;
+        callbacks.onAvatarGesture?.(gesture);
       }
     }
 
@@ -432,32 +442,12 @@ export function createLiveSession(callbacks = {}) {
             silenceDurationMs: 600,
           },
         },
+        outputAudioTranscription: {},
         systemInstruction: {
           parts: [{
             text: systemPrompt,
           }],
         },
-        tools: [{
-          functionDeclarations: [{
-            name: AVATAR_ANIMATION_TOOL,
-            description:
-              'Before speaking, call exactly once for these cases: wave for a greeting or farewell; ' +
-              'celebrate for success or congratulations; emphasize for a genuinely important instruction. ' +
-              'For an ordinary reply, do not call this tool. Never call it more than once per reply.',
-            parameters: {
-              type: 'OBJECT',
-              properties: {
-                animation: {
-                  type: 'STRING',
-                  enum: ['wave', 'celebrate', 'emphasize', 'neutral'],
-                  description:
-                    'wave for greetings, celebrate for success, emphasize for an important point, neutral to reset.',
-                },
-              },
-              required: ['animation'],
-            },
-          }],
-        }],
         sessionResumption: {},
       },
     });
