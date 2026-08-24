@@ -7,14 +7,11 @@
  */
 
 export const STORAGE_KEY = 'uni_voice_assistant_settings_v1';
-export const SETTINGS_VERSION = 1;
 export const MAX_PROMPT_LENGTH = 4000;
+export const MAX_PROMPT_NAME_LENGTH = 50;
+export const MAX_CUSTOM_PROMPTS = 10;
 
 const DEFAULT_VOICE_ID = 'Kore';
-
-function freezeRecords(records) {
-  return Object.freeze(records.map((record) => Object.freeze({ ...record })));
-}
 
 /**
  * Product-level voice IDs supported by the first settings UI.
@@ -23,7 +20,7 @@ function freezeRecords(records) {
  * voices should be rechecked against the active Gemini Live model before
  * release because preview API capabilities can change.
  */
-export const VOICES = freezeRecords([
+export const VOICES = [
   {
     id: 'Kore',
     label: 'Kore',
@@ -49,70 +46,31 @@ export const VOICES = freezeRecords([
     label: 'Aoede',
     description: 'Soft and melodic',
   },
-]);
+];
 
-/**
- * Prompt templates are plain data. The UI will render them with textContent
- * in a later phase, so prompt text is never treated as HTML.
- */
-export const PROMPT_TEMPLATES = freezeRecords([
-  {
-    id: 'uni',
-    title: 'Uni default',
-    tagline: 'Friendly and encouraging companion',
-    prompt: [
-      'Bạn là Uni, linh vật Live United và là một người bạn trợ lý thân thiện.',
-      'Hãy nói chuyện tự nhiên, tích cực và luôn khuyến khích người dùng.',
-      'Luôn trả lời bằng tiếng Việt, trừ khi người dùng yêu cầu rõ ràng ngôn ngữ khác.',
-    ].join('\n'),
-  },
-  {
-    id: 'artist',
-    title: 'Creative artist',
-    tagline: 'Creative ideas and visual thinking',
-    prompt: [
-      'Bạn là một nghệ sĩ sáng tạo và cố vấn ý tưởng thị giác.',
-      'Hãy giúp người dùng phát triển ý tưởng hội họa, thiết kế, màu sắc và bố cục.',
-      'Trả lời bằng tiếng Việt, giàu hình ảnh nhưng ngắn gọn, dễ nghe khi nói thành tiếng.',
-    ].join('\n'),
-  },
-  {
-    id: 'math',
-    title: 'Math and logic tutor',
-    tagline: 'Patient, clear, step-by-step guidance',
-    prompt: [
-      'Bạn là một gia sư toán học và tư duy logic kiên nhẫn.',
-      'Hãy giải thích rõ ràng, ưu tiên từng bước dễ hiểu và khuyến khích người học tự suy nghĩ.',
-      'Trả lời bằng tiếng Việt, chính xác và ngắn gọn để phù hợp với hội thoại bằng giọng nói.',
-    ].join('\n'),
-  },
-  {
-    id: 'coach',
-    title: 'Language conversation coach',
-    tagline: 'Friendly speaking practice partner',
-    prompt: [
-      'Bạn là một huấn luyện viên luyện nói tiếng Anh và tiếng Việt thân thiện.',
-      'Hãy khuyến khích người dùng giao tiếp tự tin và sửa cách diễn đạt khi cần.',
-      'Giải thích ngắn gọn bằng tiếng Việt, chỉ dùng tiếng Anh khi người dùng đang luyện tập.',
-    ].join('\n'),
-  },
-]);
+export const UNI_PROMPT = {
+  id: 'uni',
+  name: 'UNI',
+  prompt: [
+    'Bạn là Uni, linh vật Live United và là một người bạn trợ lý thân thiện.',
+    'Hãy nói chuyện tự nhiên, tích cực và luôn khuyến khích người dùng.',
+    'Luôn trả lời bằng tiếng Việt, trừ khi người dùng yêu cầu rõ ràng ngôn ngữ khác.',
+  ].join('\n'),
+};
 
-const DEFAULT_PROMPT = PROMPT_TEMPLATES[0].prompt;
-
-/**
- * Default settings are immutable. Public functions always return fresh
- * objects so callers cannot accidentally change the module defaults.
- */
-export const DEFAULT_SETTINGS = Object.freeze({
+export const DEFAULT_SETTINGS = {
   voiceId: DEFAULT_VOICE_ID,
-  prompt: DEFAULT_PROMPT,
-});
+  activePromptId: UNI_PROMPT.id,
+  prompt: UNI_PROMPT.prompt,
+  customPrompts: [],
+};
 
 function createDefaultSettings() {
   return {
     voiceId: DEFAULT_SETTINGS.voiceId,
+    activePromptId: DEFAULT_SETTINGS.activePromptId,
     prompt: DEFAULT_SETTINGS.prompt,
+    customPrompts: [],
   };
 }
 
@@ -132,17 +90,39 @@ function isKnownVoiceId(voiceId) {
   return VOICES.some((voice) => voice.id === voiceId);
 }
 
+function normalizeCustomPrompts(value) {
+  if (!Array.isArray(value)) return [];
+
+  const prompts = [];
+  const ids = new Set([UNI_PROMPT.id]);
+  for (const candidate of value) {
+    if (prompts.length >= MAX_CUSTOM_PROMPTS) break;
+    if (!candidate || typeof candidate !== 'object') continue;
+
+    const id = typeof candidate.id === 'string' ? candidate.id.trim() : '';
+    const name = typeof candidate.name === 'string' ? candidate.name.trim() : '';
+    const prompt = typeof candidate.prompt === 'string' ? candidate.prompt.trim() : '';
+    if (
+      !id || ids.has(id) ||
+      !name || name.length > MAX_PROMPT_NAME_LENGTH ||
+      !prompt || prompt.length > MAX_PROMPT_LENGTH
+    ) continue;
+
+    ids.add(id);
+    prompts.push({ id, name, prompt });
+  }
+  return prompts;
+}
+
 /**
  * Normalize a settings object without mutating it.
  *
- * Invalid/missing voice IDs and prompts fall back to defaults. An oversized
- * prompt throws RangeError instead of being silently truncated. Callers that
- * read persisted data should catch this and use defaults; callers saving user
- * input can show the error and keep the editor open.
+ * Invalid voice IDs and selections fall back to defaults. Invalid persisted
+ * custom prompt records are ignored so one damaged record does not prevent
+ * the rest of the settings from loading.
  *
  * @param {unknown} settings
- * @returns {{voiceId: string, prompt: string}}
- * @throws {RangeError} When prompt exceeds MAX_PROMPT_LENGTH.
+ * @returns {{voiceId: string, activePromptId: string, prompt: string, customPrompts: Array}}
  */
 export function normalizeSettings(settings) {
   const source = settings && typeof settings === 'object' ? settings : {};
@@ -150,25 +130,45 @@ export function normalizeSettings(settings) {
     ? source.voiceId
     : DEFAULT_SETTINGS.voiceId;
 
-  let prompt = DEFAULT_SETTINGS.prompt;
-  if (typeof source.prompt === 'string' && source.prompt.trim().length > 0) {
-    prompt = source.prompt.trim();
+  const customPrompts = normalizeCustomPrompts(source.customPrompts);
+  let activePromptId = source.activePromptId === UNI_PROMPT.id
+    ? UNI_PROMPT.id
+    : customPrompts.some((prompt) => prompt.id === source.activePromptId)
+      ? source.activePromptId
+      : UNI_PROMPT.id;
+
+  // Preserve the previous single-prompt storage format during migration.
+  if (typeof source.activePromptId !== 'string') {
+    const legacyPrompt = typeof source.prompt === 'string' ? source.prompt.trim() : '';
+    if (legacyPrompt && legacyPrompt !== UNI_PROMPT.prompt && legacyPrompt.length <= MAX_PROMPT_LENGTH) {
+      const existing = customPrompts.find((prompt) => prompt.prompt === legacyPrompt);
+      if (existing) {
+        activePromptId = existing.id;
+      } else if (customPrompts.length < MAX_CUSTOM_PROMPTS) {
+        const migrated = { id: 'custom-migrated', name: 'Saved prompt', prompt: legacyPrompt };
+        customPrompts.push(migrated);
+        activePromptId = migrated.id;
+      }
+    }
   }
 
-  if (prompt.length > MAX_PROMPT_LENGTH) {
-    throw new RangeError(
-      `The chatbot prompt must be ${MAX_PROMPT_LENGTH} characters or fewer.`,
-    );
-  }
+  const activePrompt = activePromptId === UNI_PROMPT.id
+    ? UNI_PROMPT
+    : customPrompts.find((prompt) => prompt.id === activePromptId) || UNI_PROMPT;
 
-  return { voiceId, prompt };
+  return {
+    voiceId,
+    activePromptId: activePrompt.id,
+    prompt: activePrompt.prompt,
+    customPrompts: customPrompts.map((prompt) => ({ ...prompt })),
+  };
 }
 
 /**
  * Read settings from localStorage. Storage errors, invalid JSON, and invalid
  * persisted values recover to defaults without logging the user's prompt.
  *
- * @returns {{voiceId: string, prompt: string}}
+ * @returns {{voiceId: string, activePromptId: string, prompt: string, customPrompts: Array}}
  */
 export function getSettings() {
   const storage = getStorage();
@@ -195,12 +195,11 @@ export function getSettings() {
 /**
  * Save normalized settings to localStorage.
  *
- * Oversized prompts throw RangeError. Storage write failures throw a generic
- * error without including the prompt, allowing the UI to report the failure
- * without leaking user content into logs.
+ * Storage write failures throw a generic error without including prompt text,
+ * allowing the UI to report the failure without leaking user content to logs.
  *
  * @param {unknown} settings
- * @returns {{voiceId: string, prompt: string}}
+ * @returns {{voiceId: string, activePromptId: string, prompt: string, customPrompts: Array}}
  */
 export function saveSettings(settings) {
   const normalized = normalizeSettings(settings);
@@ -210,28 +209,19 @@ export function saveSettings(settings) {
     throw new Error('Settings storage is unavailable in this browser.');
   }
 
-  const storedValue = {
-    version: SETTINGS_VERSION,
-    ...normalized,
-    updatedAt: Date.now(),
-  };
-
   try {
-    storage.setItem(STORAGE_KEY, JSON.stringify(storedValue));
+    storage.setItem(STORAGE_KEY, JSON.stringify({
+      voiceId: normalized.voiceId,
+      activePromptId: normalized.activePromptId,
+      customPrompts: normalized.customPrompts,
+    }));
   } catch (_) {
     throw new Error('Unable to save Uni settings in this browser.');
   }
 
-  return { ...normalized };
+  return normalized;
 }
 
-/**
- * Find a voice by ID without exposing the frozen internal record.
- *
- * @param {unknown} voiceId
- * @returns {{id: string, label: string, description: string}|null}
- */
 export function getVoiceById(voiceId) {
-  const voice = VOICES.find((candidate) => candidate.id === voiceId);
-  return voice ? { ...voice } : null;
+  return VOICES.find((voice) => voice.id === voiceId) || null;
 }

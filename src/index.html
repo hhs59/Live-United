@@ -13,7 +13,7 @@
   <link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'><rect width='100' height='100' rx='28' fill='%231B5FAA'/><circle cx='50' cy='50' r='28' fill='%23F5881F'/><circle cx='42' cy='45' r='4' fill='white'/><circle cx='58' cy='45' r='4' fill='white'/><path d='M39 59c7 7 15 7 22 0' fill='none' stroke='white' stroke-width='4' stroke-linecap='round'/></svg>">
 
   <!-- Stylesheet -->
-  <link rel="stylesheet" href="style.css">
+  <link rel="stylesheet" href="style.css?v=17">
 </head>
 <body>
 
@@ -65,8 +65,11 @@
         </div>
 
         <div id="avatar-container">
-          <div id="avatar-glow"></div>
-          <img id="avatar-img" src="assets/uni-idle.jpg" alt="Uni mascot - idle" />
+          <canvas
+            id="avatar-game-canvas"
+            role="img"
+            aria-label="Animated Uni mascot"
+          ></canvas>
         </div>
 
         <!-- Sound Wave Indicator (shown while listening) -->
@@ -106,7 +109,7 @@
       </section>
     </main>
 
-    <!-- Settings dialog; behavior is connected by app.js in a later phase. -->
+    <!-- Voice and persona settings -->
     <dialog id="settings-dialog" aria-labelledby="settings-title">
       <form id="settings-form" method="dialog">
         <header class="settings-header">
@@ -121,21 +124,49 @@
           <section aria-labelledby="persona-title">
             <h3 id="persona-title">Chatbot persona</h3>
             <p id="prompt-help" class="settings-help">
-              Describe how Uni should behave in the next voice session.
+              Select UNI or create a reusable prompt for the next voice session.
             </p>
-            <div id="prompt-templates" role="group" aria-label="Prompt templates"></div>
-            <label for="settings-prompt">Custom prompt</label>
-            <textarea
-              id="settings-prompt"
-              name="prompt"
-              maxlength="4000"
-              rows="8"
-              spellcheck="true"
-              aria-describedby="prompt-help prompt-error prompt-count"
-            ></textarea>
-            <div class="prompt-meta">
-              <p id="prompt-error" role="alert" aria-live="polite"></p>
-              <p><span id="prompt-count">0</span>/4000</p>
+            <div class="prompt-library-header">
+              <span>Saved prompts</span>
+              <div class="prompt-library-actions">
+                <button id="prompt-edit" type="button" hidden>Edit selected</button>
+                <button id="prompt-add" type="button">+ Add prompt</button>
+              </div>
+            </div>
+            <div id="prompt-list" role="listbox" aria-label="Saved prompts"></div>
+
+            <div id="prompt-editor" hidden>
+              <label for="settings-prompt-name">Prompt name</label>
+              <input
+                id="settings-prompt-name"
+                name="promptName"
+                maxlength="50"
+                required
+                disabled
+                autocomplete="off"
+                aria-describedby="prompt-error"
+              >
+              <label for="settings-prompt">Instructions</label>
+              <textarea
+                id="settings-prompt"
+                name="prompt"
+                maxlength="4000"
+                required
+                disabled
+                rows="7"
+                spellcheck="true"
+                aria-describedby="prompt-help prompt-error prompt-count"
+              ></textarea>
+              <div class="prompt-meta">
+                <p id="prompt-error" role="alert" aria-live="polite"></p>
+                <p><span id="prompt-count">0</span>/4000</p>
+              </div>
+              <div class="prompt-editor-actions">
+                <button id="prompt-delete" type="button" hidden>Delete</button>
+                <span aria-hidden="true"></span>
+                <button id="prompt-editor-cancel" type="button">Cancel</button>
+                <button id="prompt-editor-save" type="button">Add prompt</button>
+              </div>
             </div>
           </section>
 
@@ -163,7 +194,7 @@
   </div>
 
   <!-- Main application entry point -->
-  <script type="module" src="app.js"></script>
+  <script type="module" src="app.js?v=14"></script>
 
 </body>
 </html>

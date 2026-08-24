@@ -3,11 +3,12 @@
    ============================================================ */
 
 import { createLiveSession, isLiveAudioSupported } from './modules/live.js';
-import { setState, getState, preloadImages, STATES } from './modules/avatar.js';
+import { createLayeredAvatarRenderer } from './modules/avatar_game_renderer.js?v=14';
+import { setState, getState, STATES } from './modules/avatar.js';
 import {
   DEFAULT_SETTINGS,
-  MAX_PROMPT_LENGTH,
-  PROMPT_TEMPLATES,
+  MAX_CUSTOM_PROMPTS,
+  UNI_PROMPT,
   VOICES,
   getSettings,
   getVoiceById,
@@ -23,7 +24,14 @@ const settingsDialog = document.getElementById('settings-dialog');
 const settingsForm = document.getElementById('settings-form');
 const settingsClose = document.getElementById('settings-close');
 const settingsPrompt = document.getElementById('settings-prompt');
-const promptTemplates = document.getElementById('prompt-templates');
+const settingsPromptName = document.getElementById('settings-prompt-name');
+const promptList = document.getElementById('prompt-list');
+const promptAdd = document.getElementById('prompt-add');
+const promptEdit = document.getElementById('prompt-edit');
+const promptEditor = document.getElementById('prompt-editor');
+const promptDelete = document.getElementById('prompt-delete');
+const promptEditorCancel = document.getElementById('prompt-editor-cancel');
+const promptEditorSave = document.getElementById('prompt-editor-save');
 const promptCount = document.getElementById('prompt-count');
 const promptError = document.getElementById('prompt-error');
 const settingsVoice = document.getElementById('settings-voice');
@@ -32,12 +40,22 @@ const settingsCancel = document.getElementById('settings-cancel');
 const settingsSave = document.getElementById('settings-save');
 const settingsNotice = document.getElementById('settings-notice');
 const voiceBadgeLabel = document.getElementById('voice-badge-label');
+const avatarContainer = document.getElementById('avatar-container');
+const avatarCanvas = document.getElementById('avatar-game-canvas');
 
 let liveSession = null;
+let avatarRenderer = null;
 let isProcessing = false;
 let shuttingDown = false;
 let savedSettings = getSettings();
+let draftSettings = null;
+let editingPromptId = null;
 let settingsCloseTimer = null;
+
+function setUiState(state, message) {
+  setState(state, message);
+  avatarRenderer?.setState(state);
+}
 
 function setControls(mode) {
   const isIdle = mode === 'idle';
@@ -54,42 +72,135 @@ function updateVoiceBadge(settings) {
   voiceBadgeLabel.textContent = `Voice · ${voice?.label || settings.voiceId}`;
 }
 
-function updatePromptCounter() {
-  if (!settingsPrompt || !promptCount) return;
-  promptCount.textContent = String(settingsPrompt.value.length);
+function cloneSettings(settings) {
+  return structuredClone(settings);
 }
 
-function updateTemplateSelection() {
-  if (!promptTemplates || !settingsPrompt) return;
+function getDraftPrompt(promptId) {
+  if (promptId === UNI_PROMPT.id) return UNI_PROMPT;
+  return draftSettings?.customPrompts.find((prompt) => prompt.id === promptId) || null;
+}
 
-  const currentPrompt = settingsPrompt.value.trim();
-  for (const button of promptTemplates.querySelectorAll('button[data-template-id]')) {
-    const template = PROMPT_TEMPLATES.find(
-      (candidate) => candidate.id === button.dataset.templateId,
-    );
-    const selected = Boolean(template && template.prompt.trim() === currentPrompt);
-    button.setAttribute('aria-pressed', String(selected));
+function createPromptId() {
+  if (globalThis.crypto?.randomUUID) return `custom-${globalThis.crypto.randomUUID()}`;
+  return `custom-${Date.now().toString(36)}`;
+}
+
+function setSettingsNotice(message = '') {
+  if (settingsNotice) settingsNotice.textContent = message;
+}
+
+function renderPromptList() {
+  if (!promptList || !draftSettings) return;
+
+  promptList.replaceChildren();
+  const prompts = [UNI_PROMPT, ...draftSettings.customPrompts];
+  for (const prompt of prompts) {
+    const button = document.createElement('button');
+    const selected = prompt.id === draftSettings.activePromptId;
+    button.type = 'button';
+    button.dataset.promptId = prompt.id;
+    button.setAttribute('role', 'option');
+    button.setAttribute('aria-selected', String(selected));
+
+    const name = document.createElement('span');
+    name.className = 'prompt-option-name';
+    name.textContent = prompt.name;
+
+    const type = document.createElement('span');
+    type.className = 'prompt-option-type';
+    type.textContent = prompt.id === UNI_PROMPT.id ? 'Built-in default' : 'Custom prompt';
+
+    button.append(name, type);
+    promptList.append(button);
+  }
+
+  if (promptEdit) promptEdit.hidden = draftSettings.activePromptId === UNI_PROMPT.id;
+  if (promptAdd) {
+    promptAdd.disabled = draftSettings.customPrompts.length >= MAX_CUSTOM_PROMPTS;
+    promptAdd.title = promptAdd.disabled ? `Maximum ${MAX_CUSTOM_PROMPTS} custom prompts` : '';
   }
 }
 
-function updatePromptValidation() {
-  if (!settingsPrompt || !settingsSave) return;
+function closePromptEditor() {
+  editingPromptId = null;
+  if (promptEditor) promptEditor.hidden = true;
+  if (settingsPromptName) settingsPromptName.disabled = true;
+  if (settingsPrompt) settingsPrompt.disabled = true;
+  if (settingsSave) settingsSave.disabled = false;
+  if (promptError) promptError.textContent = '';
+}
 
-  updatePromptCounter();
-  const isTooLong = settingsPrompt.value.length > MAX_PROMPT_LENGTH;
+function updatePromptEditorValidation() {
+  if (!settingsPrompt || !settingsPromptName || !promptEditorSave) return;
+  const valid = settingsPromptName.checkValidity() && settingsPrompt.checkValidity();
+  if (promptCount) promptCount.textContent = String(settingsPrompt.value.length);
+  settingsPromptName.toggleAttribute('aria-invalid', !settingsPromptName.checkValidity());
+  settingsPrompt.toggleAttribute('aria-invalid', !settingsPrompt.checkValidity());
+  if (promptError) promptError.textContent = valid
+    ? ''
+    : settingsPromptName.validationMessage || settingsPrompt.validationMessage;
+  promptEditorSave.disabled = !valid;
+}
 
-  if (isTooLong) {
-    settingsPrompt.setAttribute('aria-invalid', 'true');
-    if (promptError) {
-      promptError.textContent = `Prompt must be ${MAX_PROMPT_LENGTH} characters or fewer.`;
-    }
-  } else {
-    settingsPrompt.removeAttribute('aria-invalid');
-    if (promptError) promptError.textContent = '';
+function openPromptEditor(promptId = null) {
+  if (!promptEditor || !settingsPromptName || !settingsPrompt || !draftSettings) return;
+
+  const prompt = promptId ? getDraftPrompt(promptId) : null;
+  if (promptId && (!prompt || prompt.id === UNI_PROMPT.id)) return;
+
+  editingPromptId = prompt?.id || null;
+  settingsPromptName.disabled = false;
+  settingsPrompt.disabled = false;
+  settingsPromptName.value = prompt?.name || '';
+  settingsPrompt.value = prompt?.prompt || '';
+  promptEditor.hidden = false;
+  if (promptDelete) promptDelete.hidden = !editingPromptId;
+  if (promptEditorSave) promptEditorSave.textContent = editingPromptId ? 'Save prompt' : 'Add prompt';
+  if (settingsSave) settingsSave.disabled = true;
+  setSettingsNotice('');
+  updatePromptEditorValidation();
+  settingsPromptName.focus();
+}
+
+function savePromptEditor() {
+  if (!draftSettings || !settingsPromptName || !settingsPrompt) return;
+  updatePromptEditorValidation();
+  if (promptEditorSave?.disabled) return;
+
+  const record = {
+    id: editingPromptId || createPromptId(),
+    name: settingsPromptName.value.trim(),
+    prompt: settingsPrompt.value.trim(),
+  };
+  const existingIndex = draftSettings.customPrompts.findIndex(
+    (prompt) => prompt.id === editingPromptId,
+  );
+
+  if (existingIndex >= 0) draftSettings.customPrompts[existingIndex] = record;
+  else if (draftSettings.customPrompts.length < MAX_CUSTOM_PROMPTS) {
+    draftSettings.customPrompts.push(record);
+  } else return;
+
+  draftSettings.activePromptId = record.id;
+  draftSettings.prompt = record.prompt;
+  closePromptEditor();
+  renderPromptList();
+  setSettingsNotice('Prompt ready. Save settings to keep changes.');
+}
+
+function deleteEditedPrompt() {
+  if (!draftSettings || !editingPromptId) return;
+  draftSettings.customPrompts = draftSettings.customPrompts.filter(
+    (prompt) => prompt.id !== editingPromptId,
+  );
+  if (draftSettings.activePromptId === editingPromptId) {
+    draftSettings.activePromptId = UNI_PROMPT.id;
+    draftSettings.prompt = UNI_PROMPT.prompt;
   }
-
-  settingsSave.disabled = isTooLong;
-  updateTemplateSelection();
+  closePromptEditor();
+  renderPromptList();
+  setSettingsNotice('Prompt removed. Save settings to keep changes.');
 }
 
 function populateVoiceOptions() {
@@ -105,36 +216,13 @@ function populateVoiceOptions() {
   }
 }
 
-function renderPromptTemplates() {
-  if (!promptTemplates) return;
-
-  promptTemplates.replaceChildren();
-  for (const template of PROMPT_TEMPLATES) {
-    const button = document.createElement('button');
-    button.type = 'button';
-    button.dataset.templateId = template.id;
-    button.setAttribute('aria-pressed', 'false');
-    button.title = template.tagline;
-
-    const title = document.createElement('span');
-    title.className = 'prompt-template-title';
-    title.textContent = template.title;
-
-    const tagline = document.createElement('span');
-    tagline.className = 'prompt-template-tagline';
-    tagline.textContent = template.tagline;
-
-    button.append(title, tagline);
-    promptTemplates.append(button);
-  }
-}
-
 function populateSettingsForm(settings) {
-  if (!settingsPrompt || !settingsVoice) return;
+  if (!settingsVoice) return;
 
-  settingsPrompt.value = settings.prompt;
+  draftSettings = cloneSettings(settings);
   settingsVoice.value = settings.voiceId;
-  updatePromptValidation();
+  closePromptEditor();
+  renderPromptList();
 }
 
 function clearSettingsMessages() {
@@ -155,7 +243,7 @@ function openSettings() {
     settingsDialog.setAttribute('open', '');
   }
 
-  settingsPrompt?.focus();
+  promptList?.querySelector('[aria-selected="true"]')?.focus();
 }
 
 function closeSettings() {
@@ -182,12 +270,13 @@ function isSessionActive() {
 }
 
 function saveDraftSettings() {
-  if (!settingsPrompt || !settingsVoice) return;
+  if (!draftSettings || !settingsVoice) return;
 
   try {
     const normalized = normalizeSettings({
-      prompt: settingsPrompt.value,
       voiceId: settingsVoice.value,
+      activePromptId: draftSettings.activePromptId,
+      customPrompts: draftSettings.customPrompts,
     });
     savedSettings = saveSettings(normalized);
     updateVoiceBadge(savedSettings);
@@ -200,22 +289,12 @@ function saveDraftSettings() {
 
     settingsCloseTimer = window.setTimeout(closeSettings, 700);
   } catch (error) {
-    if (error instanceof RangeError) {
-      settingsPrompt.setAttribute('aria-invalid', 'true');
-      if (promptError) promptError.textContent = error.message;
-      settingsSave.disabled = true;
-      return;
-    }
-
-    if (settingsNotice) {
-      settingsNotice.textContent = error.message || 'Unable to save settings.';
-    }
+    setSettingsNotice(error.message || 'Unable to save settings.');
   }
 }
 
 function initializeSettings() {
   populateVoiceOptions();
-  renderPromptTemplates();
   updateVoiceBadge(savedSettings);
 }
 
@@ -237,38 +316,49 @@ settingsForm?.addEventListener('submit', (event) => {
   if (!settingsSave?.disabled) saveDraftSettings();
 });
 
-settingsPrompt?.addEventListener('input', () => {
-  updatePromptValidation();
-});
+settingsPrompt?.addEventListener('input', updatePromptEditorValidation);
+settingsPromptName?.addEventListener('input', updatePromptEditorValidation);
 
 settingsReset?.addEventListener('click', () => {
-  populateSettingsForm(DEFAULT_SETTINGS);
-  if (settingsNotice) settingsNotice.textContent = 'Defaults ready to save.';
+  if (!draftSettings) return;
+  draftSettings.activePromptId = UNI_PROMPT.id;
+  draftSettings.prompt = UNI_PROMPT.prompt;
+  settingsVoice.value = DEFAULT_SETTINGS.voiceId;
+  closePromptEditor();
+  renderPromptList();
+  setSettingsNotice('Default prompt and voice ready to save.');
 });
 
-promptTemplates?.addEventListener('click', (event) => {
-  const button = event.target.closest('button[data-template-id]');
-  if (!button || !promptTemplates.contains(button)) return;
+promptList?.addEventListener('click', (event) => {
+  const button = event.target.closest('button[data-prompt-id]');
+  if (!button || !promptList.contains(button) || !draftSettings) return;
+  const prompt = getDraftPrompt(button.dataset.promptId);
+  if (!prompt) return;
 
-  const template = PROMPT_TEMPLATES.find(
-    (candidate) => candidate.id === button.dataset.templateId,
-  );
-  if (!template || !settingsPrompt) return;
-
-  settingsPrompt.value = template.prompt;
-  updatePromptValidation();
+  draftSettings.activePromptId = prompt.id;
+  draftSettings.prompt = prompt.prompt;
+  closePromptEditor();
+  renderPromptList();
 });
+
+promptAdd?.addEventListener('click', () => openPromptEditor());
+promptEdit?.addEventListener('click', () => openPromptEditor(draftSettings?.activePromptId));
+promptEditorCancel?.addEventListener('click', closePromptEditor);
+promptEditorSave?.addEventListener('click', savePromptEditor);
+promptDelete?.addEventListener('click', deleteEditedPrompt);
 
 function showError(message) {
   isProcessing = false;
   startBtn.disabled = false;
   startBtn.classList.remove('active');
   setControls('idle');
-  setState(STATES.ERROR, message || 'Unable to connect to Uni.');
+  avatarRenderer?.setAudioLevel(0);
+  avatarRenderer?.stop();
+  setUiState(STATES.ERROR, message || 'Unable to connect to Uni.');
 
   setTimeout(() => {
     if (!shuttingDown && getState() === STATES.ERROR) {
-      setState(STATES.IDLE);
+      setUiState(STATES.IDLE);
     }
   }, 4000);
 }
@@ -276,7 +366,7 @@ function showError(message) {
 function createSession() {
   liveSession = createLiveSession({
     onConnecting: () => {
-      setState(STATES.THINKING, 'Connecting to Uni...');
+      setUiState(STATES.THINKING, 'Connecting to Uni...');
     },
 
     onConnected: () => {
@@ -287,44 +377,51 @@ function createSession() {
       startBtn.disabled = false;
       startBtn.classList.add('active');
       setControls('listening');
-      setState(STATES.LISTENING);
-    },
-
-    onThinking: () => {
-      startBtn.classList.remove('active');
-      setControls('busy');
-      setState(STATES.THINKING, 'Uni is thinking...');
+      setUiState(STATES.LISTENING);
     },
 
     onAudioStart: () => {
+      avatarRenderer?.setAudioLevel(0);
       setControls('busy');
-      setState(STATES.SPEAKING, 'Speaking...');
+      setUiState(STATES.SPEAKING, 'Speaking...');
+    },
+
+    onAudioLevel: (level) => {
+      avatarRenderer?.setAudioLevel(level);
+    },
+
+    onAvatarGesture: (name) => {
+      avatarRenderer?.playGesture(name);
     },
 
     onTurnComplete: () => {
+      avatarRenderer?.setAudioLevel(0);
+      avatarRenderer?.stop();
       if (liveSession?.isListening()) return;
       isProcessing = false;
       startBtn.disabled = false;
       startBtn.classList.remove('active');
       setControls('idle');
-      setState(STATES.IDLE);
+      setUiState(STATES.IDLE);
     },
 
     onInterrupted: () => {
+      avatarRenderer?.setAudioLevel(0);
       if (liveSession?.isListening()) {
         startBtn.classList.add('active');
         setControls('listening');
-        setState(STATES.LISTENING);
+        setUiState(STATES.LISTENING);
       } else {
         startBtn.classList.remove('active');
         setControls('idle');
-        setState(STATES.IDLE);
+        setUiState(STATES.IDLE);
       }
     },
 
     onPlaybackInterrupted: () => {
+      avatarRenderer?.setAudioLevel(0);
       if (!liveSession?.isListening() && getState() === STATES.SPEAKING) {
-        setState(STATES.IDLE);
+        setUiState(STATES.IDLE);
       }
     },
 
@@ -333,7 +430,9 @@ function createSession() {
       startBtn.disabled = false;
       startBtn.classList.remove('active');
       setControls('idle');
-      setState(STATES.IDLE);
+      avatarRenderer?.setAudioLevel(0);
+      avatarRenderer?.stop();
+      setUiState(STATES.IDLE);
     },
 
     onError: (message) => {
@@ -357,7 +456,7 @@ async function beginListening() {
   isProcessing = true;
   startBtn.disabled = true;
   setControls('busy');
-  setState(STATES.THINKING, 'Connecting to Uni...');
+  setUiState(STATES.THINKING, 'Connecting to Uni...');
 
   try {
     await liveSession.startListening({
@@ -403,6 +502,15 @@ document.addEventListener('keydown', (event) => {
 
 async function init() {
   initializeSettings();
+  avatarRenderer = createLayeredAvatarRenderer({
+    canvas: avatarCanvas,
+    container: avatarContainer,
+    onError: (error) => {
+      console.warn('Avatar renderer failed; voice remains available.', error);
+    },
+  });
+  avatarRenderer.show();
+  avatarRenderer.connect();
 
   if (!isLiveAudioSupported()) {
     unsupportedBanner.textContent =
@@ -410,6 +518,7 @@ async function init() {
     unsupportedBanner.classList.add('show');
     startBtn.disabled = true;
     setControls('idle');
+    setUiState(STATES.IDLE);
     return;
   }
 
@@ -420,13 +529,13 @@ async function init() {
   }
 
   createSession();
-  await preloadImages();
-  setState(STATES.IDLE);
+  setUiState(STATES.IDLE);
 }
 
 window.addEventListener('pagehide', () => {
   shuttingDown = true;
   liveSession?.destroy();
+  avatarRenderer?.destroy();
 });
 
 init();

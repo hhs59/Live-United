@@ -3,7 +3,6 @@ import {
   MAX_PROMPT_LENGTH,
   VOICES,
 } from './settings.js';
-import { getBackendUrl } from './backend_api.js';
 
 const LIVE_MODEL = 'gemini-3.1-flash-live-preview';
 const LIVE_WS_URL =
@@ -15,6 +14,8 @@ const OUTPUT_SAMPLE_RATE = 24000;
 const DEFAULT_VOICE = DEFAULT_SETTINGS.voiceId;
 const ALLOWED_VOICE_IDS = new Set(VOICES.map((voice) => voice.id));
 const AUDIO_WORKLET_NAME = 'uni-pcm-capture';
+const AVATAR_ANIMATION_TOOL = 'play_mascot_animation';
+const AVATAR_ANIMATIONS = new Set(['wave', 'celebrate', 'emphasize', 'neutral']);
 
 // The browser microphone context is commonly 44.1kHz or 48kHz. This worklet resamples it to the 16kHz, signed 16-bit PCM required by Live API.
 const WORKLET_SOURCE = [
@@ -120,7 +121,7 @@ function getServerError(response) {
   return 'The Gemini Live API closed the connection.';
 }
 
-//normalize teh prompts and voice before connecting to Gemini
+// Normalize the prompt and voice before connecting to Gemini.
 function normalizeSessionConfig(sessionConfig) {
   const source = sessionConfig && typeof sessionConfig === 'object'
     ? sessionConfig
@@ -143,7 +144,7 @@ function normalizeSessionConfig(sessionConfig) {
   };
 }
 
-//conbime the custom prompt with the base prompt
+// Combine the custom prompt with the base prompt.
 function composeSystemPrompt(basePrompt, customPrompt) {
   const base = typeof basePrompt === 'string' ? basePrompt.trim() : '';
   const custom = typeof customPrompt === 'string' ? customPrompt.trim() : '';
@@ -166,8 +167,8 @@ function composeSystemPrompt(basePrompt, customPrompt) {
  * Normalize one playback RMS sample against the current response peak.
  *
  * This is intentionally pure: the caller owns the returned state, which makes
- * the audio-to-avatar mapping testable without Web Audio. Mouth motion itself
- * is smoothed once by avatar_mouth.js, not here.
+ * the audio-to-avatar mapping testable without Web Audio. The layered avatar
+ * animator owns the visible mouth smoothing.
  */
 export function normalizePlaybackLevel(rms, state = {}, options = {}) {
   const numericRms = Number(rms);
@@ -252,8 +253,8 @@ export function createLiveSession(callbacks = {}) {
     try {
       playbackAnalyser = audioContext.createAnalyser();
       playbackAnalyser.fftSize = 256;
-      // Keep the analyser responsive; avatar_mouth.js owns the only visible
-      // attack/release envelope.
+      // Keep the analyser responsive; the layered avatar animator owns the
+      // visible attack/release envelope.
       playbackAnalyser.smoothingTimeConstant = 0;
       playbackAnalyserData = new Uint8Array(playbackAnalyser.fftSize);
       playbackAnalyser.connect(audioContext.destination);
@@ -389,6 +390,31 @@ export function createLiveSession(callbacks = {}) {
     startPlaybackLevelLoop();
   }
 
+  function handleToolCall(toolCall) {
+    const functionResponses = [];
+    for (const functionCall of toolCall?.functionCalls || []) {
+      let response;
+      if (functionCall.name === AVATAR_ANIMATION_TOOL) {
+        const requested = functionCall.args?.animation;
+        const animation = AVATAR_ANIMATIONS.has(requested) ? requested : 'neutral';
+        callbacks.onAvatarGesture?.(animation);
+        response = { result: { status: 'played', animation } };
+      } else {
+        response = { error: `Unsupported local tool: ${functionCall.name}` };
+      }
+
+      functionResponses.push({
+        id: functionCall.id,
+        name: functionCall.name,
+        response,
+      });
+    }
+
+    if (functionResponses.length) {
+      send({ toolResponse: { functionResponses } });
+    }
+  }
+
   async function handleMessage(event) {
     const raw = typeof event.data === 'string' ? event.data : await event.data.text();
     let response;
@@ -415,6 +441,8 @@ export function createLiveSession(callbacks = {}) {
       reportError(error);
       return;
     }
+
+    if (response.toolCall) handleToolCall(response.toolCall);
 
     const serverContent = response.serverContent;
     if (!serverContent) return;
@@ -466,6 +494,26 @@ export function createLiveSession(callbacks = {}) {
             text: systemPrompt,
           }],
         },
+        tools: [{
+          functionDeclarations: [{
+            name: AVATAR_ANIMATION_TOOL,
+            description:
+              'Play one short local mascot gesture when it meaningfully supports the spoken reply. ' +
+              'Use at most once per reply and do not call it for every sentence.',
+            parameters: {
+              type: 'OBJECT',
+              properties: {
+                animation: {
+                  type: 'STRING',
+                  enum: ['wave', 'celebrate', 'emphasize', 'neutral'],
+                  description:
+                    'wave for greetings, celebrate for success, emphasize for an important point, neutral to reset.',
+                },
+              },
+              required: ['animation'],
+            },
+          }],
+        }],
         sessionResumption: {},
       },
     });
@@ -552,7 +600,9 @@ export function createLiveSession(callbacks = {}) {
     tokenRequestController = requestController;
 
     try {
-      const tokenResponse = await fetch(getBackendUrl('/api/live-token'), {
+      const backendOrigin = window.UNI_BACKEND_URL ||
+        `${window.location.protocol}//${window.location.hostname}:3000`;
+      const tokenResponse = await fetch(new URL('/api/live-token', backendOrigin), {
         method: 'POST',
         signal: requestController.signal,
       });

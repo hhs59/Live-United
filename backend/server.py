@@ -1,23 +1,12 @@
 import json
 import http.server
 import os
-import socketserver
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
 
 from google import genai
 from google.genai import types
 
-from .avatar_pipeline import prepare_avatar
-from .avatar_vision import (
-    ALLOWED_AVATAR_MIME_TYPES,
-    MAX_AVATAR_IMAGE_BYTES,
-    AvatarVisionError,
-    AvatarVisionQuotaError,
-    AvatarVisionUnavailableError,
-    normalize_mime_type,
-    validate_image_signature,
-)
 from .prompts import BASE_SYSTEM_PROMPT
 
 
@@ -55,8 +44,6 @@ FRONTEND_ORIGINS = {
     ).split(",")
     if origin.strip()
 }
-
-API_POST_PATHS = frozenset({"/api/live-token", "/api/avatar/prepare"})
 
 if not API_KEY:
     print("WARNING: GEMINI_API_KEY is not set in the environment or .env file.")
@@ -114,7 +101,7 @@ class UniApiHandler(http.server.BaseHTTPRequestHandler):
         super().end_headers()
 
     def do_OPTIONS(self):
-        if self.path not in API_POST_PATHS:
+        if self.path != "/api/live-token":
             self.send_error(404)
             return
 
@@ -127,7 +114,7 @@ class UniApiHandler(http.server.BaseHTTPRequestHandler):
         self.send_error(404)
 
     def do_POST(self):
-        if self.path not in API_POST_PATHS:
+        if self.path != "/api/live-token":
             self.send_error(404)
             return
 
@@ -142,10 +129,6 @@ class UniApiHandler(http.server.BaseHTTPRequestHandler):
             )
             return
 
-        if self.path == "/api/avatar/prepare":
-            self._handle_avatar_preparation()
-            return
-
         try:
             self._send_json(200, create_live_token())
         except Exception as error:
@@ -155,107 +138,9 @@ class UniApiHandler(http.server.BaseHTTPRequestHandler):
                 {"error": "Unable to connect to the Gemini Live API. Check the API key and quota."},
             )
 
-    def _read_avatar_request(self):
-        raw_mime_type = self.headers.get("Content-Type", "")
-        mime_type = normalize_mime_type(raw_mime_type)
-        if mime_type not in ALLOWED_AVATAR_MIME_TYPES:
-            raise AvatarVisionError("Avatar image must be PNG or JPEG.")
-
-        raw_length = self.headers.get("Content-Length")
-        try:
-            content_length = int(raw_length) if raw_length is not None else -1
-        except ValueError:
-            content_length = -1
-
-        if content_length <= 0:
-            raise AvatarVisionError("Avatar image length is invalid.")
-        if content_length > MAX_AVATAR_IMAGE_BYTES:
-            raise OverflowError("Avatar image is too large.")
-
-        image_bytes = self.rfile.read(content_length)
-        if len(image_bytes) != content_length:
-            raise AvatarVisionError("Avatar image body is incomplete.")
-
-        try:
-            validate_image_signature(image_bytes, mime_type)
-        except AvatarVisionError:
-            raise AvatarVisionError("Avatar image body is not a valid PNG or JPEG.")
-
-        return image_bytes, mime_type
-
-    def _handle_avatar_preparation(self):
-        try:
-            image_bytes, mime_type = self._read_avatar_request()
-        except OverflowError:
-            self._send_json(
-                413,
-                {
-                    "error": "Avatar image is too large.",
-                    "code": "avatar_too_large",
-                },
-            )
-            return
-        except AvatarVisionError:
-            self._send_json(
-                400,
-                {
-                    "error": "Avatar image request is invalid.",
-                    "code": "invalid_avatar_request",
-                },
-            )
-            return
-
-        try:
-            preparation = prepare_avatar(
-                client,
-                image_bytes,
-                mime_type,
-                cache_dir=BASE_DIR / "runtime" / "avatar-preparation" / "cache-v1",
-            )
-            self._send_json(200, preparation)
-        except AvatarVisionError:
-            self._send_json(
-                422,
-                {
-                    "error": "Avatar geometry could not be prepared.",
-                    "code": "avatar_not_detected",
-                },
-            )
-        except AvatarVisionQuotaError:
-            self._send_json(
-                429,
-                {
-                    "error": "Avatar preparation quota is unavailable.",
-                    "code": "avatar_analysis_quota",
-                },
-            )
-        except AvatarVisionUnavailableError:
-            self._send_json(
-                503,
-                {
-                    "error": "Avatar preparation is temporarily unavailable.",
-                    "code": "avatar_analysis_unavailable",
-                },
-            )
-        except Exception as error:
-            print("Avatar preparation failed:", type(error).__name__)
-            self._send_json(
-                500,
-                {
-                    "error": "Avatar preparation failed.",
-                    "code": "avatar_analysis_failed",
-                },
-            )
-
 
 def run_server():
-    http_server = type(
-        "UniApiServer",
-        (socketserver.ThreadingTCPServer,),
-        {"allow_reuse_address": True, "daemon_threads": True},
-    )
-
-    with http_server((HOST, PORT), UniApiHandler) as httpd:
+    with http.server.ThreadingHTTPServer((HOST, PORT), UniApiHandler) as httpd:
         print(f"Uni backend API running at http://localhost:{PORT}")
         print(f"Allowed frontend origins: {', '.join(sorted(FRONTEND_ORIGINS))}")
         print(f"Live voice model: {LIVE_MODEL} | Vietnamese response language")
