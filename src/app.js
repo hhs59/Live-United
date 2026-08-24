@@ -133,6 +133,8 @@ function closePromptEditor() {
 
 function updatePromptEditorValidation() {
   if (!settingsPrompt || !settingsPromptName || !promptEditorSave) return;
+  settingsPromptName.setCustomValidity(settingsPromptName.value.trim() ? '' : 'Enter a prompt name.');
+  settingsPrompt.setCustomValidity(settingsPrompt.value.trim() ? '' : 'Enter prompt instructions.');
   const valid = settingsPromptName.checkValidity() && settingsPrompt.checkValidity();
   if (promptCount) promptCount.textContent = String(settingsPrompt.value.length);
   settingsPromptName.toggleAttribute('aria-invalid', !settingsPromptName.checkValidity());

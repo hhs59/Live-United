@@ -1,7 +1,37 @@
-import {
-  DEFAULT_LAYERED_AVATAR_MANIFEST_URL,
-  loadLayeredAvatarPackage,
-} from './avatar_asset_manifest.js?v=7';
+const DEFAULT_LAYERED_AVATAR_MANIFEST_URL =
+  'assets/avatar/characters/uni-3d/manifest.json';
+
+async function loadLayeredAvatarPackage({ manifestUrl }) {
+  const response = await fetch(manifestUrl, { cache: 'no-cache' });
+  if (!response.ok) throw new Error(`Unable to load avatar manifest: HTTP ${response.status}.`);
+
+  const manifest = await response.json();
+  const baseUrl = new URL(manifestUrl, location.href);
+  const layers = await Promise.all(manifest.layers.map(async (layer, manifestIndex) => {
+    const image = new Image();
+    image.decoding = 'async';
+    image.src = new URL(layer.asset, baseUrl);
+    if (image.decode) await image.decode();
+    else await new Promise((resolve, reject) => {
+      image.onload = resolve;
+      image.onerror = reject;
+    });
+    return {
+      ...layer,
+      layout: layer.layout || { x: 0, y: 0, width: 1, height: 1 },
+      manifestIndex,
+      image,
+    };
+  }));
+
+  return {
+    manifest,
+    sourceWidth: manifest.canvas.width,
+    sourceHeight: manifest.canvas.height,
+    layers: layers.sort((a, b) => a.zIndex - b.zIndex || a.manifestIndex - b.manifestIndex),
+    slots: manifest.slots,
+  };
+}
 import {
   AVATAR_RUNTIME_STATES,
   createAnimatorState,
