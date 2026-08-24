@@ -2,7 +2,7 @@
    App.js — Main voice-only application logic
    ============================================================ */
 
-import { createLiveSession, isLiveAudioSupported } from './modules/live.js';
+import { createLiveSession, isLiveAudioSupported } from './modules/live.js?v=15';
 import { createLayeredAvatarRenderer } from './modules/avatar_game_renderer.js?v=14';
 import { setState, getState, STATES } from './modules/avatar.js';
 import {
